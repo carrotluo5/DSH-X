@@ -4,7 +4,7 @@
   "version": "0.1.13",
   "private": true,
   "type": "module",
-  "description": "DeepSeek Harness 轻量 Windows 启动器。选一个版本，启动 dsh web。",
+  "description": "DeepSeek Harness 轻量启动器（Windows 原版 / macOS 社区移植）。选一个版本，启动 dsh web。",
   "main": "start.js",
   "engines": {
     "node": ">=22.18.0"
@@ -12,8 +12,9 @@
   "scripts": {
     "start": "node start.js",
     "server": "node server.js",
-    "test": "node --test",
-    "dist": "node scripts/pack.mjs"
+    "dist": "node scripts/pack.mjs",
+    "macos": "node scripts/build-macos.mjs",
+    "macos:dmg": "node scripts/build-macos.mjs --dmg"
   },
   "author": "yyh",
   "license": "MIT"

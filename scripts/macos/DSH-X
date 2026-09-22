@@ -1,0 +1,143 @@
+#!/bin/bash
+# DSH-X 的 macOS 启动壳。
+#
+# 双击 .app 时由 Finder 交给 launchd 执行本脚本。职责只有三件事：
+#   1. 找到 Node（>= 22.19）
+#   2. 起一个脱离 Finder 会话的后台管理器进程，日志落在 appSettingsDir()/manager.log
+#   3. 用系统默认浏览器打开管理页
+#
+# 之所以不直接把 node 塞进 .app 的 Info.plist：那样进程挂在 launchd 的
+# 应用会话下，窗口/信号的行为和双击图标该有的样子不一致；这里走一次 detach，
+# 跟 Windows 上「DSH.exe 起 node，然后自己常驻」是同一个形态。
+set -u
+
+HERE="$(cd "$(dirname "$0")" && pwd)"          # …/DSH-X.app/Contents/MacOS
+APP="$(cd "$HERE/../../.." && pwd)"            # …/DSH-X.app
+SRC="$HERE/../Resources/app"                   # 打包进来的 DSH-X 源码
+LOG_DIR="${DSH_X_HOME:-$HOME/Library/Application Support/DSH}"
+LOG="$LOG_DIR/manager.log"
+STATE="$LOG_DIR/app-launch.log"
+
+mkdir -p "$LOG_DIR"
+
+say() {
+  printf '[%s] %s\n' "$(date '+%Y-%m-%dT%H:%M:%S')" "$*" >> "$STATE"
+}
+
+alert() {
+  /usr/bin/osascript -e "display alert \"DSH-X\" message \"$1\" as critical" >/dev/null 2>&1
+}
+
+# ---- 找 Node ----------------------------------------------------------------
+NODE=""
+for candidate in \
+  "${DSH_X_NODE:-}" \
+  /opt/homebrew/bin/node \
+  /usr/local/bin/node \
+  "$HOME/.local/bin/node" \
+  "$(command -v node 2>/dev/null || true)"
+do
+  [ -n "$candidate" ] && [ -x "$candidate" ] || continue
+  major="$("$candidate" -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
+  minor="$("$candidate" -p 'process.versions.node.split(".")[1]' 2>/dev/null || echo 0)"
+  if [ "$major" -gt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -ge 19 ]; }; then
+    NODE="$candidate"
+    break
+  fi
+done
+
+if [ -z "$NODE" ]; then
+  say "没有找到 Node >= 22.19"
+  alert "没有找到 Node.js 22.19 或更新版本。\\n\\n请先安装（推荐 Homebrew）：\\n  brew install node\\n\\n装好后重新双击 DSH-X。"
+  exit 1
+fi
+
+say "使用 Node $NODE"
+
+# ---- PATH：GUI 启动的程序只拿到 /usr/bin:/bin:/usr/sbin:/sbin ----------------
+# 从 Finder / launchd 起来的进程不读 ~/.zshrc，Homebrew 的 /opt/homebrew/bin 不在
+# PATH 里。管理器本身不受影响（它用绝对路径起 node），但 `dsh plugin` 是靠 PATH
+# 找 pnpm 的，不补上插件页一点就报「找不到 pnpm」。先按已知位置拼一遍，还找不到
+# 就借用户的登录 shell 问一次。
+prepend_path() {
+  case ":$PATH:" in
+    *":$1:"*) ;;
+    *) [ -d "$1" ] && PATH="$1:$PATH" ;;
+  esac
+}
+
+prepend_path /opt/homebrew/bin
+prepend_path /opt/homebrew/sbin
+prepend_path /usr/local/bin
+prepend_path /usr/local/sbin
+prepend_path "$HOME/.local/bin"
+# npm 全局 bin（nvm / 官方 pkg 装的 node 常把 pnpm 放这儿）
+if command -v npm >/dev/null 2>&1; then
+  NPM_PREFIX="$(npm prefix -g 2>/dev/null || true)"
+  [ -n "$NPM_PREFIX" ] && prepend_path "$NPM_PREFIX/bin"
+fi
+# nvm：取最新的一个版本
+if [ -d "$HOME/.nvm/versions/node" ]; then
+  NEWEST_NVM="$(ls -1 "$HOME/.nvm/versions/node" 2>/dev/null | sort -V | tail -1)"
+  [ -n "$NEWEST_NVM" ] && prepend_path "$HOME/.nvm/versions/node/$NEWEST_NVM/bin"
+fi
+
+if ! command -v pnpm >/dev/null 2>&1; then
+  # 兜底：问一次登录 shell。用 env -i 起一个干净环境，它的 .zshrc/.zprofile 不会
+  # 递归回到本脚本；输出只取最后一行、必须是冒号分隔的绝对路径，防止把 shell 的
+  # 欢迎语之类垃圾塞进 PATH。
+  SHELL_PATH="$(
+    env -i HOME="$HOME" USER="${USER:-$(id -un)}" /bin/zsh -l -i -c 'printf "%s" "$PATH"' 2>/dev/null \
+      | tail -1
+  )"
+  case "$SHELL_PATH" in
+    /*:*) PATH="$SHELL_PATH" ;;
+  esac
+fi
+
+export PATH
+say "PATH=$PATH"
+if ! command -v pnpm >/dev/null 2>&1; then
+  say "警告：PATH 里没有 pnpm，插件安装/卸载会失败"
+fi
+
+# ---- 已经在跑就只叫窗口 ------------------------------------------------
+PORT_FILE="$LOG_DIR/port"
+if [ -f "$PORT_FILE" ]; then
+  PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
+  if [ -n "${PORT:-}" ] && /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:$PORT/api/ping" >/dev/null 2>&1; then
+    say "管理页已经在 $PORT 上跑着，直接开页面"
+    /usr/bin/open "http://127.0.0.1:$PORT/"
+    exit 0
+  fi
+fi
+
+# ---- 起管理器（脱离本进程） --------------------------------------------
+say "启动管理器"
+cd "$SRC" || { alert "找不到内置的 DSH-X 源码目录（$SRC）"; exit 1; }
+
+# setsid 在 macOS 上不存在，用 nohup + 后台作业 + 立刻退出实现同样的效果：
+# 本脚本一退出，Finder 那边的 .app 生命周期就结束了，node 继续跑。
+nohup "$NODE" start.js >>"$LOG" 2>&1 &
+NODE_PID=$!
+say "node pid=$NODE_PID"
+
+# 等管理页起来（最多 ~20 秒），再开浏览器
+for _ in $(seq 1 100); do
+  sleep 0.2
+  if ! kill -0 "$NODE_PID" 2>/dev/null; then
+    say "管理器进程提前退出，见 $LOG"
+    alert "DSH-X 启动失败，请看日志：\\n$LOG"
+    exit 1
+  fi
+  PORT="$(cat "$PORT_FILE" 2>/dev/null || true)"
+  if [ -n "${PORT:-}" ] && /usr/bin/curl -fsS --max-time 1 "http://127.0.0.1:$PORT/api/ping" >/dev/null 2>&1; then
+    /usr/bin/open "http://127.0.0.1:$PORT/"
+    say "已打开 http://127.0.0.1:$PORT/"
+    exit 0
+  fi
+done
+
+say "等待超时，仍然打开默认端口"
+/usr/bin/open "http://127.0.0.1:3780/"
+exit 0

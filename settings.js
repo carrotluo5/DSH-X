@@ -4,10 +4,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { appSettingsDir, launchAgentStatus, setLaunchAgent, IS_MAC } from './platform.mjs'
 
 const execFileAsync = promisify(execFile)
 const ROOT = dirname(fileURLToPath(import.meta.url))
-const SETTINGS_DIR = process.env.APPDATA ? join(process.env.APPDATA, 'DSH') : join(ROOT, 'data')
+const SETTINGS_DIR = appSettingsDir()
 const SETTINGS_FILE = join(SETTINGS_DIR, 'settings.json')
 const RUN_REG = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run'
 const RUN_NAME = 'DSH'
@@ -79,11 +80,9 @@ function hasInstall(dir) {
 
 export function safeDataDir(dir) {
   if (typeof dir !== 'string' || !dir.trim()) throw new Error('版本目录不能为空')
-  const trimmed = dir.trim()
-  // 先判再 resolve：resolve 会把相对路径按当前工作目录补齐，补完就永远是绝对路径，
-  // 倒过来判等于没有这条校验——用户在设置页填个 dsh-data 会安静地落到启动器所在目录
-  if (!isAbsolute(trimmed)) throw new Error('请使用绝对路径')
-  return resolve(trimmed)
+  const resolved = resolve(dir.trim())
+  if (!isAbsolute(resolved)) throw new Error('请使用绝对路径')
+  return resolved
 }
 
 export function fallbackDataDir() {
@@ -96,6 +95,8 @@ export function fallbackDataDir() {
   if (existsSync(join(ROOT, 'DSH.exe')) && process.env.APPDATA) {
     return join(process.env.APPDATA, 'DSH', 'data')
   }
+  // macOS：版本装在 ~/Library/Application Support/DSH/data，跟设置文件同处
+  if (IS_MAC) return join(SETTINGS_DIR, 'data')
   return local
 }
 
@@ -177,6 +178,9 @@ export async function ensureSettings() {
 export function launchCommand() {
   const exe = join(ROOT, 'DSH.exe')
   if (existsSync(exe)) return `"${exe}"`
+  // macOS 用 .app 包（build-macos.mjs 生成），双击/自启都是它
+  const app = join(ROOT, 'DSH-X.app')
+  if (IS_MAC && existsSync(app)) return `"${app}"`
   return `"${process.execPath}" "${join(ROOT, 'start.js')}"`
 }
 
@@ -185,6 +189,7 @@ function runReg(args) {
 }
 
 export async function autoStartEnabled() {
+  if (IS_MAC) return launchAgentStatus()
   if (process.platform !== 'win32') return false
   try {
     await runReg(['query', RUN_REG, '/v', RUN_NAME])
@@ -195,8 +200,10 @@ export async function autoStartEnabled() {
 }
 
 export async function setAutoStart(enabled) {
+  // macOS：写 ~/Library/LaunchAgents 的 launchd plist，不需要管理员权限
+  if (IS_MAC) return setLaunchAgent(Boolean(enabled))
   if (process.platform !== 'win32') {
-    if (enabled) throw new Error('开机自启目前只支持 Windows')
+    if (enabled) throw new Error('开机自启目前只支持 Windows / macOS')
     return
   }
   const on = await autoStartEnabled()

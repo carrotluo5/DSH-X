@@ -16,6 +16,12 @@ DeepSeek Harness 轻量 Windows 启动器。选一个版本，在系统浏览器
 > **DSH-X 启动的是 DeepSeek Harness 官方原版 Web 页面，不是桌面端。**  
 > 它只负责版本安装、启动和插件管理，不内嵌 WebView，不修改或重做 DSH 的网页界面。DSH-X 本身是社区开源项目，并非 DeepSeek 官方产品。
 
+> [!NOTE]
+> **这是带 macOS 移植的检出。** 上游只发 Windows 安装包；本检出产出 `release/DSH-X.app`
+> ——一个 **AppKit + WKWebView 写的原生窗口应用**（不是浏览器外壳、也不是 Electron），
+> 对应上游那个 Rust 壳。构建 / 使用 / 与上游的差异见 **[MACOS.md](MACOS.md)**。
+> Windows 打包流程（`npm run dist`）未改动。
+
 ## 功能
 
 - **选版本即用**：启动 / 停止 / 重启 / 更新 / 卸载

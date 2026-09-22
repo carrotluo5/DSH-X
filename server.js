@@ -6,6 +6,19 @@ import { homedir, tmpdir } from 'node:os'
 import { basename, delimiter, dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { cmpVer, installSpec, listPackage, parseVer } from './registry.js'
+import {
+  IS_MAC,
+  IS_WINDOWS,
+  NODE_BIN,
+  appSettingsDir,
+  bundledRuntimeDir,
+  clearPortFile,
+  hasBundledRuntime,
+  hasCommand,
+  writePortFile,
+  killTree as killProcessTree,
+  npmRootCandidates,
+} from './platform.mjs'
 import pkg from './package.json' with { type: 'json' }
 import {
   disableRowId,
@@ -66,15 +79,21 @@ const READY_RE = /dsh web:\s+(https?:\/\/[^\s]+)/
 const START_TIMEOUT_MS = 120_000
 // 启动 profile：设置页可改，startServer() 里按设置定值
 let PROFILE_NAME = resolveProfile()
-const LOG_DIR = process.env.APPDATA ? join(process.env.APPDATA, 'DSH') : join(ROOT, 'data')
+const LOG_DIR = appSettingsDir()
 const LOG_FILE = join(LOG_DIR, 'manager.log')
 const LOG_MAX_BYTES = 5 * 1024 * 1024
 const NOISY_LOG_RE = /^(?:已安装 \d+\/\d+|已解析 \d+)/
 
 const clients = new Set()
 const stateListeners = new Set()
+// 宿主（原生壳 / start.js）可以挂的钩子：
+//   onWake    另一个实例双击启动时来叫窗口
+//   onReady   服务真的监听上了，把最终端口交出去（macOS 壳靠它拿到端口）
+//   onOpenUrl 要开 dsh 页面时先问宿主——原生壳开成自己的窗口，不再抢系统浏览器
 let host = {
   onWake: async () => {},
+  onReady: async () => {},
+  onOpenUrl: null,
 }
 const logs = []
 let current = null
@@ -113,23 +132,8 @@ function managedBin(version) {
 }
 
 function systemNpmRoots() {
-  const roots = []
-  const seen = new Set()
-  const add = (dir) => {
-    if (!dir || seen.has(dir)) return
-    seen.add(dir)
-    roots.push(dir)
-  }
-  if (process.env.APPDATA) add(join(process.env.APPDATA, 'npm', 'node_modules'))
-  if (process.env.LOCALAPPDATA) add(join(process.env.LOCALAPPDATA, 'npm', 'node_modules'))
-  if (process.env.npm_config_prefix) add(join(process.env.npm_config_prefix, 'node_modules'))
-  for (const key of ['ProgramW6432', 'ProgramFiles', 'ProgramFiles(x86)']) {
-    const base = process.env[key]
-    if (base) add(join(base, 'nodejs', 'node_modules'))
-  }
-  add('/usr/local/lib/node_modules')
-  add(join(homedir(), '.npm-global', 'lib', 'node_modules'))
-  return roots
+  // 候选目录（含 Homebrew 的 /opt/homebrew/lib/node_modules）由 platform.mjs 给
+  return npmRootCandidates()
 }
 
 function detectSystemDsh() {
@@ -201,28 +205,14 @@ function safeVersion(version) {
 const KEEP_VERSIONS = 2
 
 /**
- * 装完新版后该留哪几个：刚装的那个 + 版本号最高的，正在跑的一定留。
- * `versions[0]` 是 install() 刚插到最前面的那个，**不是**「版本号最高的那个」——
- * 用户可以挑一个旧版本装。只按位置取前两个的话，装旧版就会把最新版删掉。
- */
-export function versionsToKeep(versions, currentVersion, limit = KEEP_VERSIONS) {
-  if (!versions.length) return new Set()
-  const [installed, ...rest] = versions
-  const ranked = [...rest].sort((a, b) =>
-    cmpVer(parseVer(b) ?? parseVer('0'), parseVer(a) ?? parseVer('0')))
-  const keep = new Set([installed, ...ranked.slice(0, Math.max(0, limit - 1))])
-  if (currentVersion) keep.add(currentVersion)
-  return keep
-}
-
-/**
  * 装完新版后清理旧版本：只留最新的和上一个，正在运行的除外。
  * @returns 被清理掉的版本号
  */
 async function pruneVersions(config) {
   const versions = listedVersions(config)
   if (versions.length <= KEEP_VERSIONS) return []
-  const keep = versionsToKeep(versions, current?.version)
+  const keep = new Set(versions.slice(0, KEEP_VERSIONS))
+  if (current?.version) keep.add(current.version)
   const removed = []
   for (const version of versions) {
     if (keep.has(version)) continue
@@ -594,42 +584,18 @@ function dshEnv(version) {
   return env
 }
 
-/** 某个 PATH 条目里是否已经能直接调到这个命令（Windows 上按 PATHEXT 补后缀猜）。 */
-function hasCommand(dir, name) {
-  const exts = process.platform === 'win32'
-    ? ['', ...String(process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM').split(';').filter(Boolean)]
-    : ['']
-  return exts.some((ext) => existsSync(join(dir, name + ext)))
-}
-
-/**
- * 自带运行时的 PATH 排序（纯函数；目录是否真的存在由调用方判断）。
- *
- * 自带目录默认排最前，但系统 PATH 里**已经有 pnpm** 时例外：自带的 pnpm 8 默认
- * store 是 v3，而 pnpm 10/11 用 v11。比启动器装得还早的 profile，`.modules.yaml`
- * 里记的是当年那个全局 pnpm 的 v11 store；把自带 pnpm 顶到前面，pnpm 发现 store
- * 对不上就以 ERR_PNPM_UNEXPECTED_STORE 拒绝一切 add/remove，插件页的卸载、更新
- * 全红（#12）。所以 pnpm 让系统的优先，node/npm 仍用自带的（插件里的原生模块
- * 指望它构建）——自带目录整体紧随其后，系统没有 pnpm 时行为照旧。
- */
-export function orderRuntimePaths(parts, dir) {
-  const rest = parts.filter((item) => item !== dir)
-  const pnpmDir = rest.find((item) => hasCommand(item, 'pnpm'))
-  if (!pnpmDir) return [dir, ...rest]
-  return [pnpmDir, dir, ...rest.filter((item) => item !== pnpmDir)]
-}
-
 /**
  * 把便携运行时的目录放到 PATH 最前面。
  *
  * `dsh plugin` 是 pnpm 的透传器，装插件（含首次预装 dshmarket）必须有 pnpm；机器上
  * 有没有全局 pnpm 全看运气，所以安装包自带一份。另外插件里常带原生模块和 postinstall
- * 构建脚本，也指望能就地找到 node/npm。系统里已经有 pnpm 时的排序见 orderRuntimePaths。
+ * 构建脚本，也指望能就地找到 node/npm。
  */
-export function withBundledRuntime(pathValue) {
-  const dir = join(ROOT, 'node')
-  if (!existsSync(join(dir, 'node.exe'))) return pathValue
-  return orderRuntimePaths(String(pathValue).split(delimiter).filter(Boolean), dir).join(delimiter)
+function withBundledRuntime(pathValue) {
+  const dir = bundledRuntimeDir()
+  if (!hasBundledRuntime()) return pathValue
+  const parts = String(pathValue).split(delimiter).filter(Boolean)
+  return [dir, ...parts.filter((item) => item !== dir)].join(delimiter)
 }
 
 /** 当前 profile 目录。 */
@@ -637,9 +603,32 @@ function profileDir() {
   return join(homeDir(), 'profiles', PROFILE_NAME)
 }
 
-/** dsh 启动参数。 */
-function bootArgs() {
-  return [PROFILE_NAME, '--host', '127.0.0.1', '--port', '0', '--no-open']
+/**
+ * dsh 启动参数。
+ *
+ * 官方默认端口是 3080（`dsh --profile web` 不带 --port 时就是它）。
+ * 上游写死 `--port 0` 是为了让系统随便分配，避免和已经开着的 dsh 抢端口；
+ * macOS 上用户要的就是官方那个固定端口，被占用再往后顺延。
+ */
+const DSH_PORT = 3080
+const DSH_PORT_SCAN = 20
+
+function bootArgs(port = DSH_PORT) {
+  return [PROFILE_NAME, '--host', '127.0.0.1', '--port', String(port), '--no-open']
+}
+
+/** 3080 起第一个没人占用的端口。dsh 端口被占是直接退出，不会自己顺延。 */
+function pickDshPort() {
+  for (let offset = 0; offset < DSH_PORT_SCAN; offset += 1) {
+    const port = DSH_PORT + offset
+    try {
+      const probe = spawnSync('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN'], { encoding: 'utf8' })
+      if (!probe.stdout?.trim()) return port
+    } catch {
+      return port
+    }
+  }
+  return DSH_PORT
 }
 
 /** dsh 子进程的加载钩子：启动加速 + 会话事件词汇兼容（含 worker 线程那份）。 */
@@ -669,6 +658,9 @@ function spawnDsh(version, extra) {
     env: dshEnv(version),
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
+    // 类 Unix：让 dsh 自成进程组，停机时整组带走它下面的 worker / pnpm。
+    // Windows 上 detached 的语义完全不同（新控制台），保持原样，那边靠 taskkill /T。
+    detached: !IS_WINDOWS,
   })
 }
 
@@ -719,6 +711,11 @@ async function checkSelfUpdate() {
   const current = APP_VERSION
   const url = `https://github.com/${APP_REPO}/releases/latest/download/${APP_SETUP}`
   const fallback = { current, latest: null, update: false, url }
+  // macOS 上没有官方安装包可下：上游只发 DSH-Setup.exe（Inno Setup），
+  // downloadSelfUpdate() 会按 PE 头校验把它拒掉，installSelfUpdate() 更是只认
+  // powershell。所以这里直接报「没有启动器更新」，界面上那个「更新」胶囊自然隐藏，
+  // 不拿一个点了必然报错的按钮糊弄人。dsh 本体（npm 包）在 mac 上照常能更新。
+  if (IS_MAC) return fallback
   if (selfCache.data && Date.now() - selfCache.at < 30 * 60 * 1000) return selfCache.data
   try {
     const latest = await fetchLatestTag()
@@ -1241,19 +1238,8 @@ async function install(version) {
 }
 
 function killTree(pid) {
-  if (!pid) return
-  if (process.platform === 'win32') {
-    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    return
-  }
-  try {
-    process.kill(pid, 'SIGTERM')
-  } catch {
-    // already gone
-  }
+  // Windows：taskkill /T；类 Unix：给独立进程组发信号（见 platform.mjs）
+  killProcessTree(pid)
 }
 
 function attachProcess(version, child) {
@@ -1367,8 +1353,9 @@ async function selfCheckPage(url, version) {
 async function bootOnce(ver) {
   await mkdir(homeDir(), { recursive: true })
   await seedMarket(ver)
-  pushLog(`启动 ${ver} · profile ${PROFILE_NAME}`)
-  const child = spawnDsh(ver, bootArgs())
+  const port = pickDshPort()
+  pushLog(`启动 ${ver} · profile ${PROFILE_NAME} · 端口 ${port}`)
+  const child = spawnDsh(ver, bootArgs(port))
   const proc = attachProcess(ver, child)
   await emitState()
   try {
@@ -1599,8 +1586,22 @@ function openExternal(target) {
   execFile(process.platform === 'darwin' ? 'open' : 'xdg-open', [url])
 }
 
+/**
+ * 开一个本机页面（dsh 的 Web 界面）。
+ *
+ * 挂了 onOpenUrl 钩子就交给宿主：macOS 原生壳会开一个自己的窗口，页面不出应用。
+ * 钩子自己会兜底（处理不了就退回系统浏览器），所以这里不再重复尝试。
+ */
 function openLocalUrl(target) {
-  openExternal(assertLocalUrl(target))
+  const url = assertLocalUrl(target)
+  if (typeof host.onOpenUrl === 'function') {
+    Promise.resolve(host.onOpenUrl(url)).catch((error) => {
+      pushLog(`宿主打开页面失败，改用系统浏览器：${error?.message || error}`)
+      openExternal(url)
+    })
+    return
+  }
+  openExternal(url)
 }
 
 /**
@@ -1936,11 +1937,20 @@ export async function startServer() {
     server = attempt
     PORT = candidate
     if (offset > 0) pushLog(`管理页改用端口 ${PORT}（${preferred} 起被占用）`)
+    // 把实际端口记下来：双击 .app 的外壳靠它判断「是不是已经在跑」并打开对的端口
+    await writePortFile(PORT)
+    // 原生壳（macOS）在等这个回调：端口只有这里才知道
+    try { await host.onReady?.(PORT) } catch (error) { pushLog(`端口回传失败：${error?.message || error}`) }
     pushLog(`DSH 管理器 http://127.0.0.1:${PORT}`)
     pushLog(`版本目录 ${DATA}`)
     pushLog(`DSH_HOME ${homeDir()}`)
     const system = detectSystemDsh()
     if (system) pushLog(`发现系统已安装 ${system.version}`)
+    // macOS 没有便携运行时，插件安装用的是系统 pnpm（Windows 包里自带一份）。
+    // 缺了就把原因写进日志，别等用户在插件页点了「安装」才收到一句看不懂的报错。
+    if (IS_MAC && !hasBundledRuntime() && !hasCommand('pnpm')) {
+      pushLog('提示：没找到 pnpm，插件安装/卸载会失败。装一个：brew install pnpm（或 npm i -g pnpm）')
+    }
     console.log(`dsh-versions: http://127.0.0.1:${PORT}`)
     console.log(`dsh-versions data: ${DATA}`)
     console.log(`dsh-versions home: ${homeDir()}`)
@@ -1952,6 +1962,7 @@ export async function startServer() {
 export async function stopAll() {
   if (current) killTree(current.child.pid)
   current = null
+  await clearPortFile()
   for (const res of clients) {
     try { res.end() } catch { /* already gone */ }
   }
