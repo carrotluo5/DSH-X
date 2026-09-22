@@ -17,10 +17,8 @@ DeepSeek Harness 轻量 Windows 启动器。选一个版本，在系统浏览器
 > 它只负责版本安装、启动和插件管理，不内嵌 WebView，不修改或重做 DSH 的网页界面。DSH-X 本身是社区开源项目，并非 DeepSeek 官方产品。
 
 > [!NOTE]
-> **这是带 macOS 移植的检出。** 上游只发 Windows 安装包；本检出产出 `release/DSH-X.app`
-> ——一个 **AppKit + WKWebView 写的原生窗口应用**（不是浏览器外壳、也不是 Electron），
-> 对应上游那个 Rust 壳。构建 / 使用 / 与上游的差异见 **[MACOS.md](MACOS.md)**。
-> Windows 打包流程（`npm run dist`）未改动。
+> **这是 [yyh-001/DSH-X](https://github.com/yyh-001/DSH-X) 的 macOS 分支，社区移植，不是 DeepSeek 官方产品。**
+> 管理页是一个本地应用，DSH 页面在系统浏览器里打开。下载、环境要求和与上游的差异见 **[MACOS.md](MACOS.md)**。
 
 ## 功能
 
@@ -51,9 +49,18 @@ DeepSeek Harness 轻量 Windows 启动器。选一个版本，在系统浏览器
   <img src="docs/screenshot-settings.png" alt="DSH-X 设置页" width="820" />
 </p>
 
+## 下载
+
+| 系统 | 安装包 | 说明 |
+| --- | --- | --- |
+| macOS 12+，Apple Silicon | [DSH-X-0.1.13-mac.dmg](https://github.com/carrotluo5/DSH-X/releases/latest/download/DSH-X-0.1.13-mac.dmg) | 打开后把 DSH-X 拖进「应用程序」 |
+| Windows | [DSH-Setup.exe](https://github.com/yyh-001/DSH-X/releases/latest/download/DSH-Setup.exe) | 上游原版安装包 |
+
+macOS 需要本机另装 **Node.js 22.19 或更新**（应用不内置 Node）。装、卸插件还需要 `pnpm`。第一次打开如果提示无法验证开发者，右键 DSH-X → 打开。Intel Mac 跑不了这一份。
+
 ## 使用
 
-Windows 安装 [DSH-Setup.exe](https://github.com/yyh-001/DSH-X/releases/latest) 后，从桌面打开 **DSH-X**。启动器管理页和 DSH 官方原版 Web 界面都会使用系统默认浏览器打开；管理页地址默认 `http://127.0.0.1:3780/`（设置页可改端口，改完重启启动器生效）。
+Windows 安装后从桌面打开 **DSH-X**；macOS 从启动台或「应用程序」打开。管理页地址默认 `http://127.0.0.1:3780/`（设置页可改端口，改完重启启动器生效）。点「启动」后，DSH 页面用系统浏览器打开，默认端口 3080。
 
 ## 开发
 
@@ -68,7 +75,7 @@ npm start
 
 ## 打包
 
-需要 Rust 与 Inno Setup 6（没有会尝试下载）。
+Windows 需要 Rust 与 Inno Setup 6（没有会尝试下载）：
 
 ```sh
 npm run dist
@@ -76,3 +83,10 @@ npm run dist
 
 - `release/DSH/`：便携目录
 - `release/DSH-Setup.exe`：安装包（默认 `%LOCALAPPDATA%\Programs\DSH`）
+
+macOS 只需要 Command Line Tools：
+
+```sh
+npm run macos        # release/DSH-X.app
+npm run macos:dmg    # 额外生成 dmg
+```

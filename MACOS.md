@@ -77,10 +77,20 @@ Windows 的 Foundation `Process` 有 `executionFileDescriptorMapping` 可以多�
 - `pnpm`（只有装 / 卸插件时才需要）：`brew install pnpm` 或 `npm i -g pnpm`
 - npm >= 10（Node 22+ 自带）——安装 dsh 版本时用
 
+## 下载
+
+不需要自己构建。从 [Releases](https://github.com/carrotluo5/DSH-X/releases/latest) 下载
+`DSH-X-0.1.13-mac.dmg`，打开后把 DSH-X 拖进「应用程序」。
+
+第一次打开如果被 Gatekeeper 拦住，右键 DSH-X →「打开」，或在终端执行：
+
+```sh
+xattr -dr com.apple.quarantine /Applications/DSH-X.app
+```
+
 ## 构建
 
 ```sh
-cd DSH-X-mac
 npm run macos                          # → release/DSH-X.app（原生窗口版）
 node scripts/build-macos.mjs --dmg     # 额外生成 release/DSH-X-<版本>-mac.dmg
 node scripts/build-macos.mjs --zip     # 额外生成 release/DSH-X-<版本>-mac.zip
