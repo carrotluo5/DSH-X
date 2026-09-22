@@ -11,12 +11,12 @@
 //! 把隐藏的窗口叫回来。
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::{mpsc, OnceLock};
 use std::thread;
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use tao::dpi::{LogicalSize, PhysicalPosition};
@@ -34,6 +34,11 @@ const DEFAULT_PORT: u16 = 3780;
 const PORT_WAIT: Duration = Duration::from_secs(25);
 /// 找管理页时最多往后扫这么多端口（和 server.js 的 PORT_SCAN 保持一致）。
 const PORT_SCAN: u16 = 20;
+/// 单个本机端口的探测不能拖住启动。Windows 防火墙有时会让一个未监听端口等约 2 秒才失败。
+const PROBE_CONNECT_TIMEOUT: Duration = Duration::from_millis(120);
+const PROBE_IO_TIMEOUT: Duration = Duration::from_millis(180);
+/// 顺延端口并行探测的总预算。超过这个时间就当作没有旧实例，继续创建窗口。
+const PROBE_SCAN_BUDGET: Duration = Duration::from_millis(350);
 /// 首次出现的窗口尺寸（逻辑像素）
 const WINDOW_W: f64 = 1100.0;
 const WINDOW_H: f64 = 760.0;
@@ -72,6 +77,8 @@ struct TrayState {
     status: String,
     url: String,
     installed: bool,
+    /// 界面语言（zh / en），由管理页的 /api/tray 带过来
+    lang: String,
 }
 
 impl TrayState {
@@ -90,6 +97,7 @@ fn parse_tray_state(text: &str) -> TrayState {
             "status" => state.status = value.trim().to_string(),
             "url" => state.url = value.trim().to_string(),
             "installed" => state.installed = value.trim() == "1",
+            "lang" => state.lang = value.trim().to_string(),
             _ => {}
         }
     }
@@ -102,13 +110,27 @@ struct Tray {
     open_dsh: MenuItem,
     toggle: MenuItem,
     restart: MenuItem,
+    manager: MenuItem,
+    quit: MenuItem,
 }
 
 impl Tray {
     fn sync(&self, state: &TrayState) {
         let live = state.live();
+        let en = state.lang == "en";
+        // 文案跟着界面语言走（安装时选的语言，设置页也能改）
+        self.open_dsh.set_text(if en { "Open dsh" } else { "打开 DSH" });
+        self.restart.set_text(if en { "Restart dsh" } else { "重启 DSH" });
+        self.manager.set_text(if en { "Open manager" } else { "打开管理页" });
+        self.quit.set_text(if en { "Quit" } else { "退出" });
         self.open_dsh.set_enabled(!state.url.is_empty());
-        self.toggle.set_text(if live { "停止" } else { "启动" });
+        self.toggle.set_text(if live {
+            if en { "Stop" } else { "停止" }
+        } else if en {
+            "Start"
+        } else {
+            "启动"
+        });
         self.toggle.set_enabled(state.installed && state.status != "stopping");
         self.restart.set_enabled(state.status == "running");
     }
@@ -153,6 +175,8 @@ fn build_tray(root: &Path) -> Option<Tray> {
         _icon: icon,
         open_dsh,
         toggle,
+        manager,
+        quit,
         restart,
     })
 }
@@ -328,7 +352,12 @@ fn manager_addr() -> String {
 
 /// 端口上是不是我们自己的管理页——/api/ping 带身份标记，能区分自己的实例和别人的程序。
 fn probe_manager(port: u16) -> bool {
-    let Some(text) = http_get(&format!("127.0.0.1:{port}"), "/api/ping") else {
+    let Some(text) = http_get_with_timeout(
+        &format!("127.0.0.1:{port}"),
+        "/api/ping",
+        PROBE_CONNECT_TIMEOUT,
+        PROBE_IO_TIMEOUT,
+    ) else {
         return false;
     };
     serde_json::from_str::<serde_json::Value>(&text)
@@ -339,9 +368,43 @@ fn probe_manager(port: u16) -> bool {
 
 /// 找在跑的管理页：配置端口被占时它会顺延，所以从配置端口开始往后扫。
 fn find_manager() -> Option<u16> {
-    (0..PORT_SCAN)
-        .map(|offset| configured_port().saturating_add(offset))
-        .find(|port| probe_manager(*port))
+    find_manager_from(configured_port())
+}
+
+fn find_manager_from(first: u16) -> Option<u16> {
+    if probe_manager(first) {
+        return Some(first);
+    }
+
+    // 以前这里逐个扫 20 个端口。在部分 Windows 环境里，一个未监听端口会等约 2 秒，
+    // 冷启动最坏因此要卡几十秒。配置端口先单独探测，剩余顺延端口同时查，并给整个扫描
+    // 一个很短的总预算；已有实例仍能被唤醒，新实例则尽快继续创建窗口。
+    let (sender, receiver) = mpsc::channel();
+    let mut pending = 0usize;
+    for offset in 1..PORT_SCAN {
+        let Some(port) = first.checked_add(offset) else {
+            break;
+        };
+        pending += 1;
+        let sender = sender.clone();
+        thread::spawn(move || {
+            let _ = sender.send(probe_manager(port).then_some(port));
+        });
+    }
+    drop(sender);
+
+    let deadline = Instant::now() + PROBE_SCAN_BUDGET;
+    while pending > 0 {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        match receiver.recv_timeout(remaining) {
+            Ok(Some(port)) => return Some(port),
+            Ok(None) => pending -= 1,
+            Err(_) => break,
+        }
+    }
+    None
 }
 
 /// 等管理页起来（启动到 listen 之间有一小段），并把实际端口定下来。
@@ -378,8 +441,16 @@ fn open_in_browser(url: &str) {
 }
 
 /// 极简 HTTP GET，只用来问本机管理服务一个短路径；读完整响应取正文即可。
-fn http_get(addr: &str, path: &str) -> Option<String> {    let mut stream = TcpStream::connect(addr).ok()?;
-    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+fn http_get_with_timeout(
+    addr: &str,
+    path: &str,
+    connect_timeout: Duration,
+    io_timeout: Duration,
+) -> Option<String> {
+    let socket: SocketAddr = addr.parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&socket, connect_timeout).ok()?;
+    stream.set_read_timeout(Some(io_timeout)).ok()?;
+    stream.set_write_timeout(Some(io_timeout)).ok()?;
     stream
         .write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
         .ok()?;
@@ -394,10 +465,21 @@ fn http_get(addr: &str, path: &str) -> Option<String> {    let mut stream = TcpS
     )
 }
 
+fn http_get(addr: &str, path: &str) -> Option<String> {
+    http_get_with_timeout(
+        addr,
+        path,
+        Duration::from_secs(2),
+        Duration::from_secs(2),
+    )
+}
+
 /// 同样极简的 POST，用来让本机管理服务执行托盘菜单的动作；正文固定给个空 JSON。
 fn http_post(addr: &str, path: &str) -> Option<String> {
-    let mut stream = TcpStream::connect(addr).ok()?;
+    let socket: SocketAddr = addr.parse().ok()?;
+    let mut stream = TcpStream::connect_timeout(&socket, Duration::from_secs(2)).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    stream.set_write_timeout(Some(Duration::from_secs(2))).ok()?;
     let head = format!(
         "POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n"
     );
@@ -732,6 +814,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::net::TcpListener;
 
     #[test]
     fn decodes_the_icon_at_full_size() {
@@ -746,5 +829,38 @@ mod tests {
     #[test]
     fn missing_icon_is_not_fatal() {
         assert!(load_window_icon(Path::new("does-not-exist")).is_none());
+    }
+
+    #[test]
+    fn finds_a_manager_on_a_shifted_port() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind fake manager");
+        let port = listener.local_addr().expect("fake manager address").port();
+        assert!(port > 1, "ephemeral port should have a previous port");
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept launcher probe");
+            let mut request = [0u8; 512];
+            let _ = stream.read(&mut request);
+            let body = r#"{"app":"dsh-x"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).expect("reply to launcher probe");
+        });
+
+        assert_eq!(find_manager_from(port - 1), Some(port));
+    }
+
+    #[test]
+    fn empty_port_scan_stays_within_the_startup_budget() {
+        // 这段端口在本机防火墙下逐个 TcpStream::connect 约等 2 秒。旧实现扫描 20 个
+        // 最坏会卡几十秒；并行短超时实现即使机器繁忙也应远低于这个数量级。
+        let started = Instant::now();
+        assert_eq!(find_manager_from(48_761), None);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "empty scan took {:?}",
+            started.elapsed()
+        );
     }
 }

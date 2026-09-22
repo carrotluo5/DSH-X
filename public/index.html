@@ -256,6 +256,12 @@
       width: 148px;
       flex: 0 0 auto;
       cursor: pointer;
+      /* appearance:none 会把原生箭头去掉，这里自己画一个 */
+      background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath fill='%236b7d9c' d='M0 0h12L6 8z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 9px 6px;
+      padding-right: 30px;
     }
     /* 设置页的行：标题在左、控件在右，跟开关同一套节奏 */
     .field {
@@ -302,7 +308,19 @@
     }
     .advanced[open] summary::before { transform: rotate(90deg); }
     .advanced summary:hover { color: var(--text); }
-    .advanced .field { margin: 14px 0 0; }
+    .advanced .field { margin: 12px 0 0; }
+    /* 高级设置里的控件比主表单矮一档，三行看着才不散 */
+    .advanced .field input,
+    .advanced .field select { padding: 9px 12px; border-radius: 10px; font-size: 13px; }
+    .advanced .field input[type=number] { padding-right: 12px; }
+    /* 版本目录是长路径，单独占一整行 */
+    .advanced .field.wide { display: block; }
+    .advanced .field.wide > span { display: block; margin-bottom: 8px; color: var(--muted); font-size: 12px; letter-spacing: 0.08em; }
+    .advanced .field.wide input { width: 100%; text-align: left; font-variant-numeric: normal; }
+    .advanced .field.wide .row-input { display: flex; align-items: center; gap: 8px; }
+    .advanced .field.wide .row-input input { flex: 1 1 auto; min-width: 0; }
+    #pickDir { flex: 0 0 auto; height: 34px; }
+    .advanced .hint { margin: 8px 0 0; font-size: 12px; }
     /* 版本下拉：原生 select 的弹出列表没法跟随页面配色，这里整套自绘 */
     .select { position: relative; }
     .select-trigger {
@@ -738,7 +756,7 @@
     <div class="brand-block">
       <div class="brand">DSH-X</div>
       <span class="app-ver" id="appVer">__APP_VERSION__</span>
-      <button type="button" class="self-update" id="selfUpdate" hidden>更新</button>
+      <button type="button" class="self-update" id="selfUpdate" hidden data-i18n="更新">更新</button>
     </div>
     <div class="header-right">
       <a class="star-link" href="https://github.com/yyh-001/DSH-X" target="_blank" rel="noreferrer"
@@ -747,10 +765,10 @@
         <span>Star</span>
       </a>
       <nav>
-        <button class="active" data-tab="home">控制</button>
-        <button data-tab="plugins">插件</button>
-        <button data-tab="log">终端</button>
-        <button data-tab="settings">设置</button>
+        <button class="active" data-tab="home" data-i18n="控制">控制</button>
+        <button data-tab="plugins" data-i18n="插件">插件</button>
+        <button data-tab="log" data-i18n="终端">终端</button>
+        <button data-tab="settings" data-i18n="设置">设置</button>
       </nav>
       <!-- app 窗口模式才显示：原生标题栏被去掉了，最小化/最大化/关闭由页面接管 -->
       <div class="win-controls">
@@ -771,10 +789,10 @@
       <div class="card home">
         <div class="home-bar">
           <div class="home-main">
-            <label for="versionTrigger">版本</label>
+            <label for="versionTrigger" data-i18n="版本">版本</label>
             <div class="select" id="versionPicker">
               <button type="button" class="select-trigger" id="versionTrigger" aria-haspopup="listbox" aria-expanded="false">
-                <span class="select-value" id="versionValue">加载中…</span>
+                <span class="select-value" id="versionValue" data-i18n="加载中…">加载中…</span>
                 <svg class="select-caret" viewBox="0 0 12 8" aria-hidden="true"><path fill="currentColor" d="M0 0h12L6 8z"/></svg>
               </button>
               <div class="select-panel" id="versionPanel" role="listbox" hidden></div>
@@ -812,7 +830,7 @@
             </button>
           </div>
         </div>
-        <p class="hint" id="hint">插件和数据在用户目录的 .dsh。</p>
+        <p class="hint" id="hint" data-i18n="插件和数据在用户目录的 .dsh。">插件和数据在用户目录的 .dsh。</p>
         <div class="progress" id="progress" hidden>
           <div class="progress-bar" id="progress-bar"></div>
         </div>
@@ -822,66 +840,214 @@
       <div class="card plugins">
         <div class="plugin-head">
           <div>
-            <div class="plugin-title">插件</div>
+            <div class="plugin-title" data-i18n="插件">插件</div>
             <div class="plugin-sub" id="pluginSub">web profile</div>
           </div>
-          <button class="ghost" id="pluginRefresh" type="button">刷新</button>
+          <button class="ghost" id="pluginRefresh" type="button" data-i18n="刷新">刷新</button>
         </div>
         <div class="plugin-list" id="pluginList"></div>
         <p class="hint" id="pluginHint"></p>
       </div>
     </div>
     <div id="page-log" class="page">
-      <div class="logbar"><button type="button" id="clear">清空</button></div>
+      <div class="logbar"><button type="button" id="clear" data-i18n="清空">清空</button></div>
       <pre id="log"></pre>
     </div>
     <div id="page-settings" class="page">
       <div class="card settings">
-        <label class="toggle"><span>开机自启</span><input id="autoStart" type="checkbox" /></label>
-        <label class="toggle"><span>插件市场</span><input id="seedMarket" type="checkbox" /></label>
-        <label class="toggle"><span>兼容模式</span><input id="autoDisable" type="checkbox" /></label>
+        <label class="toggle"><span data-i18n="开机自启">开机自启</span><input id="autoStart" type="checkbox" /></label>
+        <label class="toggle"><span data-i18n="插件市场">插件市场</span><input id="seedMarket" type="checkbox" /></label>
+        <label class="toggle"><span data-i18n="兼容模式">兼容模式</span><input id="autoDisable" type="checkbox" /></label>
         <details class="advanced">
-          <summary>高级设置</summary>
-          <label class="field"><span>启动 profile</span><select id="profile"></select></label>
-          <label class="field"><span>管理页端口</span><input id="port" type="number" min="1" max="65535" step="1" inputmode="numeric" /></label>
+          <summary data-i18n="高级设置">高级设置</summary>
+          <label class="field"><span data-i18n="启动 profile">启动 profile</span><select id="profile"></select></label>
+          <label class="field"><span data-i18n="管理页端口">管理页端口</span><input id="port" type="number" min="1" max="65535" step="1" inputmode="numeric" /></label>
           <p class="hint" id="portHint"></p>
-          <label class="field"><span>版本目录</span><input id="dataDir" type="text" /></label>
+          <label class="field"><span data-i18n="界面语言">界面语言</span>
+            <select id="uiLang">
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label class="field wide"><span data-i18n="额外启动参数">额外启动参数</span><input id="args" type="text" spellcheck="false" autocomplete="off" placeholder="例如：--log-level debug" /></label>
+          <p class="hint" data-i18n="追加到 dsh 命令行末尾（空格分词，含空格的值用引号包起来）。已装的插件、数据不受影响。">追加到 dsh 命令行末尾（空格分词，含空格的值用引号包起来）。已装的插件、数据不受影响。</p>
+          <label class="field wide"><span data-i18n="版本目录">版本目录</span>
+            <span class="row-input">
+              <input id="dataDir" type="text" />
+              <button class="ghost" id="pickDir" type="button" data-i18n="浏览…">浏览…</button>
+            </span>
+          </label>
           <p class="hint" id="dataDirHint"></p>
         </details>
-        <button class="primary" id="saveSettings" type="button" style="margin-top: 22px">保存</button>
+        <button class="primary" id="saveSettings" type="button" style="margin-top: 22px" data-i18n="保存">保存</button>
         <p class="hint" id="settingsHint"></p>
       </div>
     </div>
   </main>
   <div class="ask" id="ask" hidden>
     <div class="ask-card" role="dialog" aria-modal="true" aria-labelledby="askTitle">
-      <h2 class="ask-title" id="askTitle">检测到新版本</h2>
+      <h2 class="ask-title" id="askTitle" data-i18n="检测到新版本">检测到新版本</h2>
       <div class="ask-items" id="askItems"></div>
       <p class="ask-note" id="askNote" hidden></p>
       <div class="progress" id="askProgress" hidden><div class="progress-bar" id="askProgressBar"></div></div>
       <div class="ask-actions" id="askActions">
-        <button type="button" class="ghost" id="askSkip">暂不更新</button>
+        <button type="button" class="ghost" id="askSkip" data-i18n="暂不更新">暂不更新</button>
       </div>
     </div>
   </div>
   <div class="ask" id="notice" hidden>
     <div class="ask-card" role="alertdialog" aria-modal="true" aria-labelledby="noticeTitle">
-      <h2 class="ask-title" id="noticeTitle">操作失败</h2>
+      <h2 class="ask-title" id="noticeTitle" data-i18n="操作失败">操作失败</h2>
       <p class="notice-text" id="noticeText"></p>
       <div class="ask-actions">
-        <button type="button" class="primary" id="noticeOk">确定</button>
+        <button type="button" class="primary" id="noticeOk" data-i18n="确定">确定</button>
       </div>
     </div>
   </div>
   <div class="gone" id="gone" hidden>
     <div>
-      <div class="gone-title">DSH-X 已退出</div>
-      <p class="gone-sub">管理器已停止运行，这个页面可以关掉了。</p>
-      <button type="button" class="ghost" id="goneClose">关闭页面</button>
+      <div class="gone-title" data-i18n="DSH-X 已退出">DSH-X 已退出</div>
+      <p class="gone-sub" data-i18n="管理器已停止运行，这个页面可以关掉了。">管理器已停止运行，这个页面可以关掉了。</p>
+      <button type="button" class="ghost" id="goneClose" data-i18n="关闭页面">关闭页面</button>
     </div>
   </div>
   <script>
+    // ---- 界面双语：字典按中文原文做 key，没翻到的原样显示中文（不会漏、不会崩） ----
+    const LANG = '__APP_LANG__'
+    const EN = {
+  "保存": "Save",
+  "关闭": "Close",
+  "关闭页面": "Close page",
+  "兼容模式": "Compatibility mode",
+  "刷新": "Refresh",
+  "加载中…": "Loading…",
+  "启动": "Start",
+  "启动 profile": "Start profile",
+  "在 GitHub 上给 DSH-X 点个 Star": "Star DSH-X on GitHub",
+  "开机自启": "Start at login",
+  "控制": "Control",
+  "插件": "Plugins",
+  "插件和数据在用户目录的 .dsh。": "Plugins and data live in .dsh in your home directory.",
+  "插件市场": "Plugin marketplace",
+  "操作失败": "Action failed",
+  "暂不更新": "Not now",
+  "更新": "Update",
+  "最大化": "Maximize",
+  "最小化": "Minimize",
+  "检测到新版本": "Update available",
+  "浏览…": "Browse…",
+  "清空": "Clear",
+  "版本": "Version",
+  "版本目录": "Version directory",
+  "确定": "OK",
+  "管理器已停止运行，这个页面可以关掉了。": "The manager has stopped; this page can be closed.",
+  "管理页端口": "Manager port",
+  "终端": "Log",
+  "设置": "Settings",
+  "追加到 dsh 命令行末尾（空格分词，含空格的值用引号包起来）。已装的插件、数据不受影响。": "Appended to the end of the dsh command line (split on spaces; quote values with spaces). Installed plugins and data are unaffected.",
+  "重启": "Restart",
+  "额外启动参数": "Extra startup arguments",
+  "界面语言": "Interface language",
+  "没有可开关的加载行（客户端插件，由插件市场管理）": "No toggleable loader row (client plugin, managed by the marketplace)",
+  "官方组件，不提供开关": "Official component, no toggle",
+  "市场自管行，不提供开关": "Marketplace-managed row, no toggle",
+  "高级设置": "Advanced",
+  "例如：--log-level debug": "e.g. --log-level debug",
+  "DSH-X 已退出": "DSH-X has exited",
+  "卸载": "Uninstall",
+  "停止": "Stop",
+  "重试": "Retry",
+  "最新": "Latest",
+  "已装": "Installed",
+  "已禁用": "Disabled",
+  "禁用": "Disable",
+  "启动中": "Starting",
+  "停止中": "Stopping",
+  "安装中": "Installing",
+  "正在启动…": "Starting…",
+  "正在停止…": "Stopping…",
+  "正在卸载…": "Uninstalling…",
+  "正在安装…": "Installing…",
+  "正在更新…": "Updating…",
+  "正在保存…": "Saving…",
+  "正在下载…": "Downloading…",
+  "正在下载新版本…": "Downloading the new version…",
+  "正在读取更新内容…": "Loading the changelog…",
+  "正在读取版本…": "Loading versions…",
+  "正在启用": "Enabling",
+  "正在禁用": "Disabling",
+  "运行中": "Running",
+  "安装并启动": "Install and start",
+  "更新并启动": "Update and start",
+  "已保存。": "Saved.",
+  "暂无版本": "No versions",
+  "读不到远程版本。": "Cannot read the remote version list.",
+  "尚未安装。": "Not installed.",
+  "最新版本，尚未安装。": "Latest version, not installed yet.",
+  "已安装。插件和数据在用户目录的 .dsh。": "Installed. Plugins and data live in .dsh in your home directory.",
+  "收起旧版本": "Show fewer versions",
+  "dsh 本体": "dsh itself",
+  "解析依赖": "Resolving dependencies",
+  "这个 profile 里没有已安装的插件。": "No plugins installed in this profile.",
+  "这个版本的更新内容不在最近的发布记录里。": "This version is not in the recent release notes.",
+  "在 GitHub 上查看完整发布说明 →": "See the full release notes on GitHub →",
+  "（无变化）": " (no change)",
+  "在弹出的对话框里选一个目录…": "Pick a directory in the dialog…",
+  "已选好目录，别忘了点「保存」让它生效。": "Directory picked — remember to hit Save.",
+  "新版本正在安装，启动器这就关闭，装完会自动打开新版。": "The new version is installing; the launcher will close and reopen when it is done.",
+  "下载完成，正在安装新版本…": "Download finished, installing the new version…",
+  "DSH-X 启动器": "DSH-X launcher",
+  "未命名": "Unnamed",
+  "已安装。可更新到 {latest}。": "Installed. {latest} is available.",
+  "更新到 {latest}": "Update to {latest}",
+  "更新 {latest}": "Update {latest}",
+  "更新启动器": "Update launcher",
+  "更新启动器到 {latest}": "Update the launcher to {latest}",
+  "更多版本…（还有 {n} 个）": "More versions… ({n} left)",
+  "卸载 {version}？插件和数据会保留。": "Uninstall {version}? Plugins and data are kept.",
+  "卸载 {version}？这是系统里的 DSH，会从本机移除。插件和数据会保留。": "Uninstall {version}? This is the system DSH and will be removed from this machine. Plugins and data are kept.",
+  "正在更新到 {latest}": "Updating to {latest}",
+  "已保存。重启启动器后管理页改到 {port} 端口。": "Saved. The manager moves to port {port} after a restart.",
+  "已保存。版本目录已改为 {dir}（立即生效）；已安装的版本不会自动迁移，需要就手动复制过去。": "Saved. The version directory is now {dir} (effective immediately); installed versions are not moved automatically.",
+  "当前实际监听 {live} 端口（配置的 {port} 被别的程序占用，启动时自动顺延）。": "Actually listening on {live} (port {port} was taken, so the launcher moved on).",
+  "dsh 各版本装在这里（几百 MB 一个）；插件和 profile 仍在 {home}，已装版本不自动迁移。": "dsh versions go here (a few hundred MB each); plugins and profiles stay in {home}, and installed versions are not moved.",
+  "上次启动自动禁用了：{names}（认为没问题可在上面重新打开）。": "Disabled at the last start: {names} (turn them back on here if that was wrong).",
+  "启动时自动禁用了：{names}（插件页可恢复）": "Disabled at start: {names} (restore them on the Plugins page)",
+  "⚠ 页面自检：{failed}/{total} 个插件包加载失败": "⚠ Page self-check: {failed}/{total} client plugin bundles failed to load",
+  "{name} 已{state}{changed}。": "{name} {state}.{changed}",
+  "正在{act} {name}…": "{act} {name}…",
+  "下载失败：{message}。可以从 GitHub 的发布页手动下载安装包。": "Download failed: {message}. You can grab the installer from the GitHub release page.",
+  "安装没能开始：{message}": "The install did not start: {message}",
+  "读取更新内容失败：{message}": "Could not load the changelog: {message}",
+  "没选成：{error}": "Not picked: {error}",
+  "{prefix}… 已解析 {done} 个依赖": "{prefix}… resolved {done} dependencies",
+  "{prefix}… 已安装 {done} 个包": "{prefix}… installed {done} packages",
+  "{prefix} {done}/{total}（{percent}%）": "{prefix} {done}/{total} ({percent}%)",
+  "正在下载新版本 {pct}%（{mb} / {size}）": "Downloading the new version: {pct}% ({mb} / {size})",
+  "行 {ids}": "rows {ids}",
+  "{profile} profile · 共 {total} 个 · {on} 个启用": "{profile} profile · {total} total · {on} enabled"
+}
+
+    function t(zh, vars) {
+      let text = lang === 'en' ? (EN[zh] || zh) : zh
+      if (vars) {
+        for (const [name, value] of Object.entries(vars)) text = text.split(`{${name}}`).join(String(value))
+      }
+      return text
+    }
+
+    function applyLang() {
+      document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'
+      for (const el of document.querySelectorAll('[data-i18n]')) {
+        el.textContent = t(el.dataset.i18n) || el.dataset.i18n
+      }
+      document.title = t('DSH-X 启动器')
+      const argsInput = document.getElementById('args')
+      if (argsInput) argsInput.placeholder = t('例如：--log-level debug')
+    }
+
     // ---- 版本下拉（自绘，替代原生 select）----
+    let lang = LANG === 'en' ? 'en' : 'zh'
     const versionRootEl = document.getElementById('versionPicker')
     const versionTriggerEl = document.getElementById('versionTrigger')
     const versionValueEl = document.getElementById('versionValue')
@@ -899,7 +1065,7 @@
 
     function paintVersionTrigger() {
       const hit = versionOptions.find((option) => option.value === versionValue)
-      versionValueEl.textContent = versionBadgeText(hit) || '暂无版本'
+      versionValueEl.textContent = versionBadgeText(hit) || t('暂无版本')
       versionTriggerEl.disabled = versionDisabled
       versionTriggerEl.setAttribute('aria-expanded', String(versionOpen))
       versionRootEl.classList.toggle('open', versionOpen)
@@ -1053,7 +1219,7 @@
     const noticeEl = document.getElementById('notice')
     const noticeTitleEl = document.getElementById('noticeTitle')
     const noticeTextEl = document.getElementById('noticeText')
-    function notify(message, title = '操作失败') {
+    function notify(message, title = t('操作失败')) {
       noticeTitleEl.textContent = title
       noticeTextEl.textContent = message == null ? '' : String(message)
       noticeEl.hidden = false
@@ -1169,10 +1335,10 @@
       const done = Number(installProgress?.done) || 0
       const phase = installProgress?.phase
       if (phase === 'resolve') {
-        return done ? `${prefix}… 已解析 ${done} 个依赖` : `${prefix}…`
+        return done ? t('{prefix}… 已解析 {done} 个依赖', { prefix, done }) : `${prefix}…`
       }
-      if (!total) return done ? `${prefix}… 已安装 ${done} 个包` : `${prefix}…`
-      return `${prefix} ${done}/${total}（${Math.round((done / total) * 100)}%）`
+      if (!total) return done ? t('{prefix}… 已安装 {done} 个包', { prefix, done }) : `${prefix}…`
+      return t('{prefix} {done}/{total}（{percent}%）', { prefix, done, total, percent: Math.round((done / total) * 100) })
     }
 
     function setMainAction(mode, label) {
@@ -1298,11 +1464,11 @@
       const nextOptions = versions.map((version) => ({
         value: version,
         text: version,
-        badge: [have.has(version) ? '已装' : '', version === latest ? '最新' : ''].filter(Boolean).join(' · '),
+        badge: [have.has(version) ? t('已装') : '', version === latest ? t('最新') : ''].filter(Boolean).join(' · '),
       }))
-      if (hidden > 0) nextOptions.push({ value: '__more__', text: `更多版本…（还有 ${hidden} 个）`, more: true })
+      if (hidden > 0) nextOptions.push({ value: '__more__', text: t('更多版本…（还有 {n} 个）', { n: hidden }), more: true })
       else if (showAllVersions && allVersions.length > RECENT_REMOTE_LIMIT + 2) {
-        nextOptions.push({ value: '__less__', text: '收起旧版本', more: true })
+        nextOptions.push({ value: '__less__', text: t('收起旧版本'), more: true })
       }
       versionOptions = nextOptions
       if (nextOptions.some((option) => option.value === current)) versionValue = current
@@ -1326,8 +1492,8 @@
       updateEl.hidden = !(canUpdate || updating) || (loading && !updating)
       updateEl.disabled = loading
       updateEl.classList.toggle('loading', updating)
-      updateEl.setAttribute('aria-label', latest ? `更新到 ${latest}` : '更新')
-      updateEl.title = latest ? `更新到 ${latest}` : '更新'
+      updateEl.setAttribute('aria-label', latest ? `更新到 ${latest}` : t('更新'))
+      updateEl.title = latest ? `更新到 ${latest}` : t('更新')
       removeEl.hidden = !have.has(version) || live || (loading && !uninstalling)
       removeEl.disabled = loading
       removeEl.classList.toggle('loading', uninstalling)
@@ -1341,57 +1507,57 @@
 
       if (updating) {
         hintEl.textContent = progressHint(`正在更新到 ${latest}`)
-        setMainAction('play', '启动')
+        setMainAction('play', t('启动'))
         return
       }
 
       if (installing) {
         hintEl.textContent = progressHint('正在安装')
-        setMainAction('play', '安装中')
+        setMainAction('play', t('安装中'))
         return
       }
       if (starting) {
-        hintEl.textContent = '正在启动…'
-        setMainAction('play', '启动中')
+        hintEl.textContent = t('正在启动…')
+        setMainAction('play', t('启动中'))
         return
       }
       if (stopping) {
-        hintEl.textContent = '正在停止…'
-        setMainAction('stop', '停止中')
+        hintEl.textContent = t('正在停止…')
+        setMainAction('stop', t('停止中'))
         return
       }
       if (uninstalling) {
-        hintEl.textContent = '正在卸载…'
-        setMainAction('play', '启动')
+        hintEl.textContent = t('正在卸载…')
+        setMainAction('play', t('启动'))
         return
       }
       if (thisRun && running.status === 'running') {
-        const mode = '运行中'
+        const mode = t('运行中')
         const fixed = stateAutoFix()
-        const note = fixed ? `<br>启动时自动禁用了：${escapeHtml(fixed)}（插件页可恢复）` : ''
+        const note = fixed ? '<br>' + t('启动时自动禁用了：{names}（插件页可恢复）', { names: escapeHtml(fixed) }) : ''
         const health = state.health && state.health.url === running.url ? state.health : null
         // 只在自检发现问题时提示；一切正常就不打扰
         const healthNote = health?.failed?.length
-          ? `<br>⚠ 页面自检：${health.failed.length}/${health.total} 个插件包加载失败`
+          ? '<br>' + t('⚠ 页面自检：{failed}/{total} 个插件包加载失败', { failed: health.failed.length, total: health.total })
           : ''
         hintEl.innerHTML = `${mode} · <a href="${running.url}" target="_blank" rel="noreferrer">${running.url}</a>${note}${healthNote}`
-        setMainAction('stop', '停止')
+        setMainAction('stop', t('停止'))
         return
       }
       if (!version) {
-        hintEl.textContent = remote.versions?.length ? '读不到远程版本。' : '正在读取版本…'
-        setMainAction('play', '启动')
+        hintEl.textContent = remote.versions?.length ? t('读不到远程版本。') : t('正在读取版本…')
+        setMainAction('play', t('启动'))
         return
       }
       if (have.has(version)) {
         hintEl.textContent = latest && compareVersion(latest, version) > 0
-          ? `已安装。可更新到 ${latest}。`
-          : '已安装。插件和数据在用户目录的 .dsh。'
-        setMainAction('play', '启动')
+          ? t('已安装。可更新到 {latest}。', { latest })
+          : t('已安装。插件和数据在用户目录的 .dsh。')
+        setMainAction('play', t('启动'))
         return
       }
-      hintEl.textContent = version === latest ? '最新版本，尚未安装。' : '尚未安装。'
-      setMainAction('play', '安装并启动')
+      hintEl.textContent = version === latest ? t('最新版本，尚未安装。') : t('尚未安装。')
+      setMainAction('play', t('安装并启动'))
     }
 
     versionOnChange = (value, keepOpen) => {
@@ -1509,8 +1675,8 @@
       if (!version) return
       const system = !isManagedVersion(version)
       const ok = confirm(system
-        ? `卸载 ${version}？这是系统里的 DSH，会从本机移除。插件和数据会保留。`
-        : `卸载 ${version}？插件和数据会保留。`)
+        ? t('卸载 {version}？这是系统里的 DSH，会从本机移除。插件和数据会保留。', { version })
+        : t('卸载 {version}？插件和数据会保留。', { version }))
       if (!ok) return
       action = 'uninstall'
       render()
@@ -1643,7 +1809,7 @@
           } else if (downloading) {
             installProgress = { phase: 'download', done: 0, total: Number(downloading[1]) }
             render()
-          } else if (String(line).startsWith('解析依赖')) {
+          } else if (String(line).startsWith(t('解析依赖'))) {
             installProgress = { phase: 'resolve' }
             render()
           }
@@ -1664,7 +1830,7 @@
           bar.style.width = `${pct}%`
           askNoteEl.hidden = false
           const mb = (n) => (n / 1048576).toFixed(1)
-          askNoteEl.textContent = `正在下载新版本 ${pct}%（${mb(data.done)} / ${data.total ? mb(data.total) : '?'} MB）`
+          askNoteEl.textContent = t('正在下载新版本 {pct}%（{mb} / {size}）', { pct, mb: mb(data.done), size: data.total ? mb(data.total) : '?' })
         } else if (data.phase === 'ready') {
           wrap.hidden = false
           wrap.classList.remove('indeterminate')
@@ -1721,8 +1887,8 @@
       if (!data.update || !selfUpdateEl) return
       const url = data.url || `https://github.com/yyh-001/DSH-X/releases/latest/download/DSH-Setup.exe`
       selfUpdateEl.hidden = false
-      selfUpdateEl.textContent = data.latest ? `更新 ${data.latest}` : '更新'
-      selfUpdateEl.title = data.latest ? `更新启动器到 ${data.latest}` : '更新启动器'
+      selfUpdateEl.textContent = data.latest ? `更新 ${data.latest}` : t('更新')
+      selfUpdateEl.title = data.latest ? `更新启动器到 ${data.latest}` : t('更新启动器')
       selfUpdateEl.onclick = () => {
         // 先问一句再把新版本摆出来（弹窗里会拉这个版本的更新内容），
         // 而不是直接下载安装包——那会立刻弹出安装程序，用户连看都没看清
@@ -1745,7 +1911,7 @@
       link.href = href
       link.target = '_blank'
       link.rel = 'noreferrer'
-      link.textContent = '在 GitHub 上查看完整发布说明 →'
+      link.textContent = t('在 GitHub 上查看完整发布说明 →')
       return link
     }
 
@@ -1755,7 +1921,7 @@
       if (!blocks.length) {
         const empty = document.createElement('p')
         empty.className = 'note-empty'
-        empty.textContent = '这个版本的更新内容不在最近的发布记录里。'
+        empty.textContent = t('这个版本的更新内容不在最近的发布记录里。')
         box.append(empty)
       } else {
         for (const block of blocks) {
@@ -1785,10 +1951,10 @@
       // 更新内容直接摊开显示，不用再点一次
       const notes = document.createElement('div')
       notes.className = 'ask-notes'
-      notes.textContent = '正在读取更新内容…'
+      notes.textContent = t('正在读取更新内容…')
       getJson(`/api/changelog?kind=${kind}&version=${encodeURIComponent(to)}`)
         .then((data) => renderNotes(notes, data))
-        .catch((error) => { notes.textContent = `读取更新内容失败：${error.message}` })
+        .catch((error) => { notes.textContent = t('读取更新内容失败：{message}', { message: error.message }) })
 
       item.append(what, notes)
 
@@ -1818,14 +1984,14 @@
       if (update.dsh) {
         rows.push(askRow(
           'dsh',
-          'dsh 本体',
+          t('dsh 本体'),
           update.dsh.current,
           update.dsh.latest,
-          `更新并启动`,
+          t('更新并启动'),
           async (event) => {
             const btn = event.currentTarget
             btn.disabled = true
-            btn.textContent = '正在更新…'
+            btn.textContent = t('正在更新…')
             dismissAsk(true)
             try {
               await startVersion(update.dsh.latest)
@@ -1838,10 +2004,10 @@
       if (update.self) {
         rows.push(askRow(
           'self',
-          'DSH-X 启动器',
+          t('DSH-X 启动器'),
           update.self.current,
-          update.self.latest || '最新',
-          '更新启动器',
+          update.self.latest || t('最新'),
+          t('更新启动器'),
           (event) => {
             const btn = event.currentTarget
             const wrap = document.getElementById('askProgress')
@@ -1850,15 +2016,15 @@
             // 安装。下载完自动走这一步，静默安装，不需要用户再点任何东西
             const openInstaller = async () => {
               btn.disabled = true
-              btn.textContent = '正在安装…'
-              askNoteEl.textContent = '下载完成，正在安装新版本…'
+              btn.textContent = t('正在安装…')
+              askNoteEl.textContent = t('下载完成，正在安装新版本…')
               try {
                 await post('/api/self/install')
-                askNoteEl.textContent = '新版本正在安装，启动器这就关闭，装完会自动打开新版。'
+                askNoteEl.textContent = t('新版本正在安装，启动器这就关闭，装完会自动打开新版。')
               } catch (error) {
                 btn.disabled = false
-                btn.textContent = '重试'
-                askNoteEl.textContent = `安装没能开始：${error.message}`
+                btn.textContent = t('重试')
+                askNoteEl.textContent = t('安装没能开始：{message}', { message: error.message })
               }
             }
             btn.onclick = openInstaller
@@ -1866,15 +2032,15 @@
             // 下载。期间按钮是禁用的，进度由服务端的 selfUpdate 事件推过来；
             // 下完不用再点一次，直接接上打开安装程序那一步
             btn.disabled = true
-            btn.textContent = '正在下载…'
-            askNoteEl.textContent = '正在下载新版本…'
+            btn.textContent = t('正在下载…')
+            askNoteEl.textContent = t('正在下载新版本…')
             askNoteEl.hidden = false
             wrap.hidden = false
             wrap.classList.remove('indeterminate')
             post('/api/self/download').then(openInstaller).catch((error) => {
               btn.disabled = false
-              btn.textContent = '更新启动器'
-              askNoteEl.textContent = `下载失败：${error.message}。可以从 GitHub 的发布页手动下载安装包。`
+              btn.textContent = t('更新启动器')
+              askNoteEl.textContent = t('下载失败：{message}。可以从 GitHub 的发布页手动下载安装包。', { message: error.message })
               wrap.hidden = true
             })
           },
@@ -1924,12 +2090,17 @@
     const profileEl = document.getElementById('profile')
     const portEl = document.getElementById('port')
     const portHint = document.getElementById('portHint')
+    const argsEl = document.getElementById('args')
+    const uiLangEl = document.getElementById('uiLang')
+    const pickDirEl = document.getElementById('pickDir')
     const dataDirEl = document.getElementById('dataDir')
     const dataDirHint = document.getElementById('dataDirHint')
     const settingsHint = document.getElementById('settingsHint')
     const saveSettingsEl = document.getElementById('saveSettings')
 
     function fillSettings(data) {
+      if ('args' in data) argsEl.value = String(data.args ?? '')
+      if ('lang' in data) uiLangEl.value = data.lang === 'en' ? 'en' : 'zh'
       if ('profile' in data) {
         const list = Array.isArray(data.profiles) && data.profiles.length ? data.profiles : [String(data.profile ?? 'web')]
         profileEl.innerHTML = list.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('')
@@ -1943,13 +2114,13 @@
       if (portHint) {
         const live = Number(data.listenPort)
         portHint.textContent = live && live !== Number(data.port)
-          ? `当前实际监听 ${live} 端口（配置的 ${data.port} 被别的程序占用，启动时自动顺延）。`
+          ? t('当前实际监听 {live} 端口（配置的 {port} 被别的程序占用，启动时自动顺延）。', { live, port: data.port })
           : ''
       }
       if ('dataDir' in data) {
         dataDirEl.value = String(data.dataDir ?? '')
         // 一次说清三件事：这是什么的目录、插件和 profile 不归它管、已装的版本不会搬家
-        dataDirHint.textContent = `dsh 各版本装在这里（每个几百 MB）；插件和 profile 仍在 ${data.dshHome || '~/.dsh'}。已安装的版本不会自动迁移。`
+        dataDirHint.textContent = t('dsh 各版本装在这里（几百 MB 一个）；插件和 profile 仍在 {home}，已装版本不自动迁移。', { home: data.dshHome || '~/.dsh' })
       }
       if ('autoStart' in data) autoStartEl.checked = Boolean(data.autoStart)
       if ('seedMarket' in data) seedMarketEl.checked = data.seedMarket !== false
@@ -1965,13 +2136,34 @@
     // 比较目录时忽略末尾斜杠：用户常带着 '\' 保存，与 resolve 后的值比会误判成改过
     const normDir = (value) => String(value ?? '').trim().replace(/[\\/]+$/, '')
 
+    pickDirEl.onclick = async () => {
+      pickDirEl.disabled = true
+      const before = dataDirHint.textContent
+      dataDirHint.textContent = t('在弹出的对话框里选一个目录…')
+      try {
+        const data = await post('/api/pick-dir', {})
+        if (data.path) {
+          dataDirEl.value = data.path
+          dataDirHint.textContent = t('已选好目录，别忘了点「保存」让它生效。')
+        } else {
+          dataDirHint.textContent = data.error ? t('没选成：{error}', { error: data.error }) : before
+        }
+      } catch (error) {
+        dataDirHint.textContent = error.message
+      } finally {
+        pickDirEl.disabled = false
+      }
+    }
+
     saveSettingsEl.onclick = async () => {
       saveSettingsEl.disabled = true
-      settingsHint.textContent = '正在保存…'
+      settingsHint.textContent = t('正在保存…')
       const dirBefore = dataDirEl.value.trim()
       try {
         const data = await post('/api/settings', {
           profile: profileEl.value.trim(),
+          args: argsEl.value,
+          lang: uiLangEl.value,
           port: Number(portEl.value),
           // 留空表示不改：服务端只在有值时才热切换版本目录
           ...(dirBefore ? { dataDir: dirBefore } : {}),
@@ -1980,13 +2172,20 @@
           autoDisablePlugins: autoDisableEl.checked,
         })
         fillSettings(data)
+        // 界面语言：保存后立刻套用（含插件页的文案）
+        if (data.lang && (data.lang === 'en' ? 'en' : 'zh') !== lang) {
+          lang = data.lang === 'en' ? 'en' : 'zh'
+          applyLang()
+          loadPlugins()
+          loadSettings()
+        }
         // 管理页还监听在旧端口上：换端口得重启启动器（窗口和托盘都是它开的）
         if (Number(data.port) !== Number(data.listenPort)) {
-          settingsHint.textContent = `已保存。重启启动器后管理页改到 ${data.port} 端口。`
+          settingsHint.textContent = t('已保存。重启启动器后管理页改到 {port} 端口。', { port: data.port })
         } else if (dirBefore && data.dataDir && normDir(data.dataDir) !== normDir(dirBefore)) {
-          settingsHint.textContent = `已保存。版本目录已改为 ${data.dataDir}（立即生效）；已安装的版本不会自动迁移，需要就手动复制过去。`
+          settingsHint.textContent = t('已保存。版本目录已改为 {dir}（立即生效）；已安装的版本不会自动迁移，需要就手动复制过去。', { dir: data.dataDir })
         } else {
-          settingsHint.textContent = '已保存。'
+          settingsHint.textContent = t('已保存。')
         }
       } catch (error) {
         settingsHint.textContent = error.message
@@ -2017,19 +2216,19 @@
       const on = list.filter((plugin) => plugin.enabled).length
       if (pluginSubEl) {
         pluginSubEl.textContent = list.length
-          ? `${data.profile || 'web'} profile · 共 ${list.length} 个 · ${on} 个启用`
+          ? t('{profile} profile · 共 {total} 个 · {on} 个启用', { profile: data.profile || 'web', total: list.length, on })
           : `${data.profile || 'web'} profile`
       }
       if (!list.length) {
-        pluginListEl.innerHTML = '<div class="plugin-empty">这个 profile 里没有已安装的插件。</div>'
+        pluginListEl.innerHTML = `<div class="plugin-empty">${t('这个 profile 里没有已安装的插件。')}</div>`
         return
       }
       pluginListEl.innerHTML = list.map((plugin) => {
         const meta = [
           plugin.version ? `v${plugin.version}` : '',
-          plugin.ids?.length ? `行 ${plugin.ids.join(', ')}` : '',
-          plugin.enabled ? '' : '已禁用',
-          plugin.toggleable ? '' : plugin.reason,
+          plugin.ids?.length ? t('行 {ids}', { ids: plugin.ids.join(', ') }) : '',
+          plugin.enabled ? '' : t('已禁用'),
+          plugin.toggleable ? '' : t(plugin.reason || ''),
         ].filter(Boolean).join(' · ')
         return `<label class="toggle plugin-row${plugin.enabled ? '' : ' off'}" title="${escapeHtml(plugin.reason || plugin.name)}">
           <span class="plugin-main">
@@ -2045,12 +2244,12 @@
     }
 
     async function togglePlugin(name, enabled) {
-      pluginHintEl.textContent = `${enabled ? '正在启用' : '正在禁用'} ${name}…`
+      pluginHintEl.textContent = t('正在{act} {name}…', { act: enabled ? t('正在启用') : t('正在禁用'), name })
       try {
         const data = await post('/api/plugins/toggle', { name, enabled })
         renderPlugins(data)
-        const changed = data.changed ? '' : '（无变化）'
-        pluginHintEl.textContent = `${name} 已${enabled ? '启用' : '禁用'}${changed}。`
+        const changed = data.changed ? '' : t('（无变化）')
+        pluginHintEl.textContent = t('{name} 已{state}{changed}。', { name, state: enabled ? t('启用') : t('禁用'), changed })
       } catch (error) {
         pluginHintEl.textContent = error.message
         loadPlugins()
@@ -2061,7 +2260,7 @@
       return getJson('/api/plugins').then((data) => {
         renderPlugins(data)
         const names = (data.autoFix?.plugins || []).map((item) => item.name || item.id).filter(Boolean)
-        if (names.length) pluginHintEl.textContent = `上次启动自动禁用了：${names.join('、')}（认为没问题可在上面重新打开）。`
+        if (names.length) pluginHintEl.textContent = t('上次启动自动禁用了：{names}（认为没问题可在上面重新打开）。', { names: names.join('、') })
         else if (!pluginsLoaded) pluginHintEl.textContent = ''
         pluginsLoaded = true
       }).catch((error) => { pluginHintEl.textContent = error.message })
@@ -2073,6 +2272,7 @@
       pluginRefreshEl.disabled = false
     }
 
+    applyLang()
     loadSettings()
   </script>
   <script src="/mascot.js" defer></script>

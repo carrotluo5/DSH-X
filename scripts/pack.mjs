@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { createWriteStream, existsSync, readFileSync, rmSync } from 'node:fs'
 import { copyFile, cp, mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
 
@@ -138,7 +138,12 @@ async function assemble() {
   ]) {
     await copyFile(join(ROOT, file), join(OUT, file))
   }
-  await cp(join(ROOT, 'public'), join(OUT, 'public'), { recursive: true })
+  // 分层版看板娘的素材暂时不装进包（文件留在仓库里；以后切回分层版就把名字从这份名单去掉）
+  const skipAssets = new Set(['head-v2.png', 'accessories-v2.png', 'ear.png'])
+  await cp(join(ROOT, 'public'), join(OUT, 'public'), {
+    recursive: true,
+    filter: (src) => !skipAssets.has(basename(src)),
+  })
   await cp(join(ROOT, 'assets'), join(OUT, 'assets'), { recursive: true })
   await copyFile(join(ROOT, 'assets', 'dsh.ico'), join(OUT, 'assets', ICON_NAME))
   await cp(join(ROOT, 'perf'), join(OUT, 'perf'), { recursive: true })

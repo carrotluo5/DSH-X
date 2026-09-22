@@ -13,6 +13,13 @@ AppId={{8F3C2A91-6B47-4E1D-9C5A-2D8E0F4B7A16}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+; 版本资源写全：未签名安装包尤其需要，信誉/启发式会读这些字段
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} 安装程序
+VersionInfoProductName={#MyAppName}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoVersion={#MyAppVersion}
+VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\DSH
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
@@ -24,6 +31,8 @@ SetupIconFile=..\assets\dsh.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2/max
 SolidCompression=yes
+; 两种语言时默认就会弹「选择安装语言」，这里显式写出意图
+ShowLanguageDialog=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -37,7 +46,7 @@ AllowNoIcons=yes
 
 [Tasks]
 ; 不带 checkedonce 就是默认勾选；带上它反而变成「首次装默认不勾」，正是之前的行为
-Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: "附加任务:"
+Name: "desktopicon"; Description: "{cm:desktopicon}"; GroupDescription: "{cm:additionaltasks}"
 
 [Files]
 Source: "..\release\DSH\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -45,21 +54,37 @@ Source: "..\release\DSH\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdir
 [Icons]
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\assets\{#MyAppIcon}"; Tasks: desktopicon
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\assets\{#MyAppIcon}"
-Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{group}\{cm:uninstall}"; Filename: "{uninstallexe}"
 
 [Languages]
-; 后者覆盖前者：中文包补全全部消息，Default.isl 在前只作兜底
+; 定义两种语言时 Inno 会先弹「选择安装语言」，并按系统语言预选——语言 id 现在写在
+; .isl 自己头上（Inno 6.5 起 [Languages] 不再接受 LanguageID 参数），
+; ChineseSimplified.isl 里是 $0804，Default.isl 就是英文。都不匹配时用列表里的第一个。
+; 中文放前面，且 Default.isl 兜底、ChineseSimplified.isl 覆盖全部消息。
 Name: "chinesesimplified"; MessagesFile: "compiler:Default.isl,ChineseSimplified.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[CustomMessages]
+chinesesimplified.desktopicon=创建桌面快捷方式
+english.desktopicon=Create a desktop shortcut
+chinesesimplified.additionaltasks=附加任务:
+english.additionaltasks=Additional tasks:
+chinesesimplified.launchapp=安装完成后启动
+english.launchapp=Launch DSH-X when done
+chinesesimplified.deleteinstaller=删除安装包
+english.deleteinstaller=Delete the installer
+chinesesimplified.uninstall=卸载 {#MyAppName}
+english.uninstall=Uninstall {#MyAppName}
 
 [Run]
 ; 下面两条只在向导模式里执行——带 postinstall 的条目要靠完成页触发，静默安装没有完成页，
 ; 所以它们一条都不会跑（实测：装完了、安装包还在、新版也没起来）。静默那条路由文件末尾的
 ; [Code] 负责，这里保留 skipifsilent 是为了让两条路互不重叠。
-Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "安装完成后启动"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
+Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Description: "{cm:launchapp}"; Flags: nowait postinstall skipifsilent shellexec runasoriginaluser
 ; 「删除安装包」默认勾选，不想删的在完成页取消。
 ; 之所以拿 ping 拖三秒：此刻 setup.exe 自己还在运行，直接 del 会被拒绝；cmd 独立于安装
 ; 程序存活，等它退出之后再删就干净了。
-Filename: "{cmd}"; Parameters: "/c ping -n 3 127.0.0.1 > nul & del /f /q ""{srcexe}"""; Description: "删除安装包"; Flags: runhidden nowait postinstall skipifsilent
+Filename: "{cmd}"; Parameters: "/c ping -n 3 127.0.0.1 > nul & del /f /q ""{srcexe}"""; Description: "{cm:deleteinstaller}"; Flags: runhidden nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\node_modules"
@@ -71,7 +96,17 @@ Type: filesandordirs; Name: "{app}\node_modules"
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
+  Lang: String;
 begin
+  // 让启动器知道安装时装的是什么语言（界面双语，见 server.js / public/index.html）
+  if (CurStep = ssPostInstall) then begin
+    if ActiveLanguage = 'english' then
+      Lang := 'en'
+    else
+      Lang := 'zh';
+    SaveStringToFile(ExpandConstant('{app}\lang.txt'), Lang, False);
+  end;
+
   if (CurStep <> ssDone) or (not WizardSilent) then
     Exit;
   // 先拉起新版

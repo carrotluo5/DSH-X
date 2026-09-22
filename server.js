@@ -33,13 +33,18 @@ import {
   autoStartEnabled,
   DEFAULT_PORT,
   ensureSettings,
+  ensureWritableDir,
   loadSettings,
+  loadSettingsSync,
+  parseArgs,
   resolveDataDir,
   resolvePort,
   resolveProfile,
   safeDataDir,
+  safeLang,
   safePort,
   safeProfile,
+  safeArgs,
   saveSettings,
   setAutoStart,
 } from './settings.js'
@@ -79,6 +84,20 @@ const READY_RE = /dsh web:\s+(https?:\/\/[^\s]+)/
 const START_TIMEOUT_MS = 120_000
 // 启动 profile：设置页可改，startServer() 里按设置定值
 let PROFILE_NAME = resolveProfile()
+// 额外启动参数：用户自己加的 argv，拼在命令行末尾（设置页可改）
+let EXTRA_ARGS = parseArgs(loadSettingsSync().args)
+// 界面语言（zh / en）：settings.json 为准；安装时选的语言写在安装目录 lang.txt，启动时对齐一次
+const INSTALL_LANG = join(ROOT, 'lang.txt')
+let LANG = safeLang(loadSettingsSync().lang) || installLang() || 'zh'
+
+/** 安装目录里的 lang.txt（安装程序写的），只认 zh / en。 */
+function installLang() {
+  try {
+    return safeLang(readFileSync(INSTALL_LANG, 'utf8'))
+  } catch {
+    return ''
+  }
+}
 const LOG_DIR = appSettingsDir()
 const LOG_FILE = join(LOG_DIR, 'manager.log')
 const LOG_MAX_BYTES = 5 * 1024 * 1024
@@ -488,7 +507,8 @@ async function snapshot() {
 }
 
 async function applyDataDir(dir) {
-  await mkdir(dir, { recursive: true })
+  // 先确认真的能写（含已存在但只读的目录），失败就带着人话抛出，DATA 保持不变
+  await ensureWritableDir(dir)
   DATA = dir
   CONFIG = join(DATA, 'config.json')
   pushLog(`版本目录 ${DATA}`)
@@ -508,6 +528,9 @@ async function publicSettings() {
     autoDisablePlugins: stored.autoDisablePlugins !== false,
     profile: PROFILE_NAME,
     profiles: listProfiles(),
+    // 回显用户填的原文（带引号），不能回显 parse 后的数组，否则含空格的值再存一次就被拆开了
+    args: stored.args ?? '',
+    lang: LANG,
   }
 }
 
@@ -522,6 +545,8 @@ async function saveManagerSettings(body) {
     dataDir: DATA,
     ...('port' in body ? { port: safePort(body.port) } : {}),
     ...('profile' in body ? { profile: safeProfile(body.profile) } : {}),
+    ...('args' in body ? { args: safeArgs(body.args) } : {}),
+    ...('lang' in body ? { lang: safeLang(body.lang) } : {}),
     autoStart: Boolean(body.autoStart),
     seedMarket: body.seedMarket !== false,
     autoDisablePlugins: body.autoDisablePlugins !== false,
@@ -532,6 +557,8 @@ async function saveManagerSettings(body) {
     pushLog(`开机自启未写入: ${error instanceof Error ? error.message : error}`)
   }
   // profile 立即生效：插件页、启动参数、npmrc 都读这个变量（已经在跑的 dsh 不受影响）
+  EXTRA_ARGS = parseArgs(stored.args)
+  if (safeLang(stored.lang)) LANG = safeLang(stored.lang)
   if (stored.profile && stored.profile !== PROFILE_NAME) {
     pushLog(`启动 profile 改为 ${stored.profile}`)
     PROFILE_NAME = stored.profile
@@ -609,12 +636,13 @@ function profileDir() {
  * 官方默认端口是 3080（`dsh --profile web` 不带 --port 时就是它）。
  * 上游写死 `--port 0` 是为了让系统随便分配，避免和已经开着的 dsh 抢端口；
  * macOS 上用户要的就是官方那个固定端口，被占用再往后顺延。
+ * 用户在设置页加的额外参数放在最后，可以继续覆盖 --port。
  */
 const DSH_PORT = 3080
 const DSH_PORT_SCAN = 20
 
 function bootArgs(port = DSH_PORT) {
-  return [PROFILE_NAME, '--host', '127.0.0.1', '--port', String(port), '--no-open']
+  return [PROFILE_NAME, '--host', '127.0.0.1', '--port', String(port), '--no-open', ...EXTRA_ARGS]
 }
 
 /** 3080 起第一个没人占用的端口。dsh 端口被占是直接退出，不会自己顺延。 */
@@ -1548,6 +1576,37 @@ function listProfiles() {
   return [...names].sort()
 }
 
+/**
+ * 弹系统「选择文件夹」对话框，返回选中的绝对路径（取消/失败就返回空串）。
+ *
+ * 页面里的 `<input type="file" webkitdirectory>` 只能拿到相对路径，浏览器也不给绝对路径，
+ * 所以目录选择必须由管理页所在的本机进程来做。
+ */
+function pickDirectory() {
+  if (process.platform !== 'win32') throw new Error('只有 Windows 支持目录选择')
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+    "$d.Description = '选择 dsh 版本目录'",
+    '$d.ShowNewFolderButton = $true',
+    "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { [Console]::Out.Write($d.SelectedPath) }",
+  ].join('; ')
+  return new Promise((resolve, reject) => {
+    execFile(
+      'powershell',
+      ['-STA', '-NoProfile', '-Command', script],
+      { windowsHide: true, timeout: 5 * 60 * 1000, encoding: 'utf8' },
+      (error, stdout) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolve(String(stdout || '').trim())
+      },
+    )
+  })
+}
+
 /** 允许当作"本机"的主机名——打开本机页面、判断请求来源都用它。 */
 const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '::1', '[::1]'])
 
@@ -1724,6 +1783,7 @@ async function handleApi(req, res, url) {
       `status=${running?.status || 'stopped'}`,
       `url=${running?.url || ''}`,
       `installed=${snap.installed.length ? 1 : 0}`,
+      `lang=${LANG}`,
     ].join('\n'), 'text/plain; charset=utf-8')
     return
   }
@@ -1838,6 +1898,15 @@ async function handleApi(req, res, url) {
     send(res, 200, { ok: true })
     return
   }
+  if (req.method === 'POST' && url.pathname === '/api/pick-dir') {
+    try {
+      send(res, 200, { path: await pickDirectory() })
+    } catch (error) {
+      pushLog(`目录选择失败: ${error?.message || error}`)
+      send(res, 200, { path: '', error: error?.message || String(error) })
+    }
+    return
+  }
   if (req.method === 'POST' && url.pathname === '/api/open') {
     openLocalUrl(body.url)
     send(res, 200, { ok: true })
@@ -1865,6 +1934,14 @@ export async function startServer() {
   // 设置页改过端口 / profile 的话，这里拿到的就是新值（PORT 环境变量仍然优先，测试用）
   if (!process.env.PORT) PORT = resolvePort()
   PROFILE_NAME = resolveProfile()
+  EXTRA_ARGS = parseArgs((await loadSettings()).args)
+  const stored = await loadSettings()
+  // 安装/升级时选过语言就以它为准，否则用设置里存的
+  const fromInstall = installLang()
+  const storedLang = safeLang(stored.lang)
+  if (fromInstall && fromInstall !== storedLang) await saveSettings({ lang: fromInstall })
+  LANG = fromInstall || storedLang || 'zh'
+  LANG = LANG === 'en' ? 'en' : 'zh'
   DATA = resolveDataDir()
   CONFIG = join(DATA, 'config.json')
   await mkdir(DATA, { recursive: true })
@@ -1892,7 +1969,9 @@ export async function startServer() {
       const type = mime(path)
       if (isTextFile(file)) {
         let body = await readFile(path, 'utf8')
-        if (file === 'index.html') body = body.replaceAll('__APP_VERSION__', APP_VERSION)
+        if (file === 'index.html') {
+          body = body.replaceAll('__APP_VERSION__', APP_VERSION).replaceAll('__APP_LANG__', LANG)
+        }
         send(res, 200, body, `${type}; charset=utf-8`)
         return
       }

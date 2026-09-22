@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -16,6 +16,39 @@ const RUN_NAME = 'DSH'
 /** 管理页端口，默认这个；被别的程序占了可以在设置页改。 */
 export const DEFAULT_PORT = 3780
 
+/** 目录不可用时给一句人话，别把 EPERM 原样丢给用户。 */
+function describeDirError(dir, error) {
+  const code = String(error?.code || '')
+  if (code === 'EPERM' || code === 'EACCES') {
+    return `没有权限写这个目录：${dir}；请换一个当前用户能写的普通目录（例如 D:\\DSH-X），不要用 Program Files、Windows 这类系统目录。`
+  }
+  if (code === 'ENOTDIR' || code === 'EEXIST') {
+    return `这不是一个目录：${dir}`
+  }
+  return `版本目录不可用：${dir}（${error?.message || error}）`
+}
+
+/**
+ * 版本目录得真的能写：先建目录，再写一个探针文件。
+ * 单靠 mkdir 不够——目录已存在时 recursive mkdir 会静默成功，但里面未必能写文件。
+ * 失败在切换目录**之前**抛出，所以 DATA / settings.json 都不会被改坏。
+ */
+export async function ensureWritableDir(dir) {
+  try {
+    await mkdir(dir, { recursive: true })
+  } catch (error) {
+    throw new Error(describeDirError(dir, error))
+  }
+  const probe = join(dir, '.dsh-write-probe')
+  try {
+    await writeFile(probe, '')
+    await rm(probe, { force: true })
+  } catch (error) {
+    throw new Error(describeDirError(dir, error))
+  }
+  return dir
+}
+
 /** dsh 的启动 profile（一个 profile 一套插件和数据），默认 web。 */
 export const DEFAULT_PROFILE = 'web'
 
@@ -23,6 +56,10 @@ export const DEFAULTS = {
   dataDir: '',
   port: DEFAULT_PORT,
   profile: DEFAULT_PROFILE,
+  // 界面语言：zh / en（安装时选的语言写进安装目录的 lang.txt，启动器读一次落到这里）
+  lang: '',
+  // 额外启动参数（一行文本，空格分词，含空格的值用引号包起来）
+  args: '',
   autoStart: false,
   seedMarket: true,
   // 启动失败时按错误点名自动禁用问题插件（兼容模式），再重试
@@ -49,6 +86,45 @@ export function safeProfile(value) {
   return name
 }
 
+/**
+ * 把「额外启动参数」那行文本切成 argv：空白分词，单双引号里的内容原样保留
+ * （`--msg "hello world"` → ['--msg', 'hello world']）。未闭合的引号按到行尾处理。
+ */
+export function parseArgs(text) {
+  const out = []
+  let current = ''
+  let quote = ''
+  let quoted = false
+  for (const ch of String(text ?? '')) {
+    if (quote) {
+      if (ch === quote) quote = ''
+      else current += ch
+      continue
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch
+      quoted = true
+      continue
+    }
+    if (/\s/.test(ch)) {
+      if (current || quoted) out.push(current)
+      current = ''
+      quoted = false
+      continue
+    }
+    current += ch
+  }
+  if (current || quoted) out.push(current)
+  return out
+}
+
+/** 额外启动参数：只留文本，长度收个口（解析在 server.js 里做）。 */
+export function safeArgs(value) {
+  const text = String(value ?? '').trim()
+  if (text.length > 2000) throw new Error('额外启动参数太长了（上限 2000 字符）')
+  return text
+}
+
 /** 启动 profile：环境变量 DSH_PROFILE 优先（开发和测试用），其次 settings.json。 */
 export function resolveProfile() {
   if (process.env.DSH_PROFILE) {
@@ -61,6 +137,12 @@ export function resolveProfile() {
   } catch {
     return DEFAULT_PROFILE
   }
+}
+
+/** 界面语言：只认 zh / en，其余当没设。 */
+export function safeLang(value) {
+  const lang = String(value ?? '').trim().toLowerCase()
+  return lang === 'en' ? 'en' : lang === 'zh' ? 'zh' : ''
 }
 
 /** 管理页端口：环境变量 PORT（开发和测试用）优先，其次 settings.json。 */
@@ -80,9 +162,12 @@ function hasInstall(dir) {
 
 export function safeDataDir(dir) {
   if (typeof dir !== 'string' || !dir.trim()) throw new Error('版本目录不能为空')
-  const resolved = resolve(dir.trim())
-  if (!isAbsolute(resolved)) throw new Error('请使用绝对路径')
-  return resolved
+  const raw = dir.trim()
+  // 先判原始输入：resolve() 在 macOS 上会把相对路径补成绝对路径，
+  // 判在它后面这条校验就永远不会触发，设置页里手填的相对路径会悄悄落到工作目录。
+  if (!isAbsolute(raw)) throw new Error('请使用绝对路径')
+  // 两种斜杠都去掉：Windows 用户从资源管理器复制的路径常以 \ 结尾。
+  return resolve(raw.replace(/[\\/]+$/, ''))
 }
 
 export function fallbackDataDir() {
@@ -144,6 +229,8 @@ export async function saveSettings(patch) {
     merged.profile = DEFAULT_PROFILE
   }
   if ('profile' in patch) merged.profile = safeProfile(patch.profile)
+  merged.args = 'args' in patch ? safeArgs(patch.args) : safeArgs(merged.args)
+  merged.lang = 'lang' in patch ? safeLang(patch.lang) : safeLang(merged.lang)
   merged.autoStart = Boolean(merged.autoStart)
   merged.seedMarket = merged.seedMarket !== false
   merged.autoDisablePlugins = merged.autoDisablePlugins !== false
