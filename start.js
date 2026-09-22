@@ -3,7 +3,6 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  pendingUpdate,
   setHost,
   shutdown,
   startServer,
@@ -106,14 +105,8 @@ async function main() {
   setHost({ onWake: () => showManager() })
 
   // 打开启动器只把界面摆出来，不再默认拉起 dsh——跑哪个版本、什么时候跑，由用户在界面上点。
-  // 有待更新还是问一下：这时候用户往往就是来点启动的，顺手让他决定要不要先更新。
-  const pending = await pendingUpdate()
-  if (pending) {
-    log('检测到更新，等用户确认', JSON.stringify(pending))
-    if (!APP_WINDOW) openPage(`${MANAGER_URL}?ask=update`)
-  } else if (!APP_WINDOW) {
-    openPage(MANAGER_URL)
-  }
+  // 更新也一样：启动时不打扰，更新按钮留在界面上，点了才弹确认。
+  if (!APP_WINDOW) openPage(MANAGER_URL)
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => {

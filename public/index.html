@@ -696,6 +696,16 @@
     .ask-notes .note-empty { margin: 0; color: var(--muted); font-size: 13px; }
     .ask-notes a { color: var(--accent); font-size: 12.5px; }
     .ask-notes .note-more { display: inline-block; margin-top: 8px; }
+    /* 升级风险：摆在更新内容上面，先看到风险再决定 */
+    .ask-risk {
+      margin: 11px 0 0;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: #fff1f4;
+      color: #8f2038;
+      font-size: 12.5px;
+      line-height: 1.55;
+    }
     /* 更新与暂不更新并排：首页的 .primary 是通栏主按钮，这里要按内容收窄 */
     .ask-actions {
       display: flex;
@@ -978,7 +988,6 @@
   "正在禁用": "Disabling",
   "运行中": "Running",
   "安装并启动": "Install and start",
-  "更新并启动": "Update and start",
   "已保存。": "Saved.",
   "暂无版本": "No versions",
   "读不到远程版本。": "Cannot read the remote version list.",
@@ -1001,6 +1010,7 @@
   "已安装。可更新到 {latest}。": "Installed. {latest} is available.",
   "更新到 {latest}": "Update to {latest}",
   "更新 {latest}": "Update {latest}",
+  "升级会先停掉正在运行的 dsh，再下载安装新版本。插件由第三方维护、通常滞后于 dsh，新版本可能让插件失效或页面打不开（插件市场就出过这种情况）。已装的其他版本会保留，随时可以切回。": "Upgrading stops the running dsh, then downloads and installs the new version. Plugins are maintained by third parties and usually lag behind dsh, so a new version can break them or stop a page from opening (that happened to the plugin market). Other installed versions are kept, so you can switch back any time.",
   "更新启动器": "Update launcher",
   "更新启动器到 {latest}": "Update the launcher to {latest}",
   "更多版本…（还有 {n} 个）": "More versions… ({n} left)",
@@ -1205,8 +1215,8 @@
     let showAllVersions = false
     const launchQuery = new URLSearchParams(location.search)
     const fromLauncher = launchQuery.has('launch') || launchQuery.has('ask')
-    // 检测到更新时启动器会带 ?ask 打开本页：用户没表态之前不许自动启动
-    let askBlocking = launchQuery.has('ask')
+    // 更新弹窗只由「更新」按钮打开，启动时不再自动弹；开着的时候不许自动启动
+    let askBlocking = false
     // DSH.exe 的窗口去掉了原生标题栏，窗口按钮和拖动都由页面接管
     const inAppWindow = launchQuery.has('window')
     if (inAppWindow) document.documentElement.classList.add('app-window')
@@ -1640,9 +1650,8 @@
         notify(error.message)
       }
     }
-    updateEl.onclick = async () => {
-      const latest = latestRemoteVersion()
-      if (!latest) return
+    /** 升级到最新版：正在跑就先停掉，装完再按原样拉起来。 */
+    async function updateToLatest(latest) {
       const running = runningInfo()
       const wasLive = Boolean(running && (running.status === 'running' || running.status === 'starting'))
       try {
@@ -1669,6 +1678,12 @@
         render()
         notify(error.message)
       }
+    }
+    updateEl.onclick = () => {
+      const latest = latestRemoteVersion()
+      if (!latest) return
+      // 升级会停掉运行中的实例，还可能让第三方插件失效：先弹确认，风险写在弹窗里
+      showAsk({ dsh: { current: versionValue || latest, latest } })
     }
     removeEl.onclick = async () => {
       const version = selected()
@@ -1902,7 +1917,6 @@
     const askActionsEl = document.getElementById('askActions')
     const askNoteEl = document.getElementById('askNote')
     const askSkipEl = document.getElementById('askSkip')
-    let askShown = false
     let askPending = null
 
     function noteLink(href) {
@@ -1935,7 +1949,7 @@
       if (data.url) box.append(noteLink(data.url))
     }
 
-    function askRow(kind, name, from, to, buttonText, onClick) {
+    function askRow(kind, name, from, to, buttonText, onClick, risk) {
       const item = document.createElement('div')
       item.className = 'ask-item'
       const what = document.createElement('div')
@@ -1956,7 +1970,14 @@
         .then((data) => renderNotes(notes, data))
         .catch((error) => { notes.textContent = t('读取更新内容失败：{message}', { message: error.message }) })
 
-      item.append(what, notes)
+      item.append(what)
+      if (risk) {
+        const warn = document.createElement('p')
+        warn.className = 'ask-risk'
+        warn.textContent = risk
+        item.append(warn)
+      }
+      item.append(notes)
 
       // 按钮不放行内，统一交给底栏和「暂不更新」并排
       const action = document.createElement('button')
@@ -1976,7 +1997,7 @@
     }
 
     function showAsk(update) {
-      askShown = true
+      askBlocking = true
       askPending = update
       askItemsEl.textContent = ''
       askNoteEl.hidden = true
@@ -1987,18 +2008,15 @@
           t('dsh 本体'),
           update.dsh.current,
           update.dsh.latest,
-          t('更新并启动'),
+          t('更新到 {latest}', { latest: update.dsh.latest }),
           async (event) => {
             const btn = event.currentTarget
             btn.disabled = true
             btn.textContent = t('正在更新…')
             dismissAsk(true)
-            try {
-              await startVersion(update.dsh.latest)
-            } catch (error) {
-              notify(error.message)
-            }
+            await updateToLatest(update.dsh.latest)
           },
+          t('升级会先停掉正在运行的 dsh，再下载安装新版本。插件由第三方维护、通常滞后于 dsh，新版本可能让插件失效或页面打不开（插件市场就出过这种情况）。已装的其他版本会保留，随时可以切回。'),
         ))
       }
       if (update.self) {
@@ -2054,25 +2072,6 @@
         for (const row of rows.filter((item) => item.kind === kind)) askActionsEl.append(row.action)
       }
       askEl.hidden = false
-    }
-
-    // 有待更新就得先让用户表态。浏览器模式由启动器带 ?ask 打开，app 窗口模式由页面自己问——
-    // 那条路不能靠服务端，因为窗口只加载一个固定的 ?window=1 地址（省掉一次会超时的往返）。
-    if (askBlocking || inAppWindow) {
-      getJson('/api/pending').then(({ update }) => {
-        if (askShown) return
-        if (!update) {
-          dismissAsk(false)
-          maybeLaunch()
-          return
-        }
-        askBlocking = true
-        showAsk(update)
-      }).catch(() => {
-        // 问不到就别拦着，按老样子启动
-        dismissAsk(false)
-        maybeLaunch()
-      })
     }
 
     askSkipEl.onclick = () => {
