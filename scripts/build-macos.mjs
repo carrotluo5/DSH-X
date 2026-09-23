@@ -14,13 +14,14 @@
  *
  * 跟 Windows 的 scripts/pack.mjs 不同，这里不下便携 Node，也不做安装包：
  *   - Node / npm / pnpm 用系统已有的（Homebrew / nvm / 官方 pkg 都行）
- *   - 分发就是一个 .app 目录，拖进「应用程序」即可
+ *   - 分发就是一个 .app 目录；`--dmg` 打成 dmg 时里面还放一个指向 /Applications 的
+ *     快捷方式和一份 readme.txt，用户打开镜像就能直接拖进「应用程序」
  * 所以体积只有几 MB。代价是目标机器得先有 Node >= 22.19——壳会检查，
  * 缺了弹原生提示告诉用户装什么。
  */
 import { spawnSync } from 'node:child_process'
-import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { chmodSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -189,10 +190,32 @@ function assembleApp({ name, background, executable }) {
   return app
 }
 
+/**
+ * 打 dmg。
+ *
+ * **不能**直接 `hdiutil create -srcfolder <app>`：那样 dmg 根目录里只有一个 .app，
+ * 用户打开以后不知道要往哪拖。规范做法是先摆一个暂存目录——
+ *   DSH-X.app
+ *   Applications -> /Applications     （拖拽目标，Finder 会显示成快捷方式）
+ *   readme.txt                        （装着 dmg 时就能看到的安装说明）
+ * 再从暂存目录建镜像。用完把暂存目录删掉。
+ */
 function makeDmg(app) {
   const dmg = join(RELEASE, `DSH-X-${PKG.version}-mac.dmg`)
+  const stage = join(RELEASE, '.dmg-stage')
   rmSync(dmg, { force: true })
-  run('hdiutil', ['create', '-volname', 'DSH-X', '-srcfolder', app, '-ov', '-format', 'UDZO', dmg])
+  rmSync(stage, { recursive: true, force: true })
+  mkdirSync(stage, { recursive: true })
+  try {
+    run('ditto', [app, join(stage, basename(app))])
+    symlinkSync('/Applications', join(stage, 'Applications'))
+    const readme = join(stage, 'readme.txt')
+    cpSync(join(ROOT, 'scripts', 'dmg-readme.txt'), readme)
+    chmodSync(readme, 0o644) // cpSync 会沿用源文件权限，别让 dmg 里出现 600 的 readme
+    run('hdiutil', ['create', '-volname', 'DSH-X', '-srcfolder', stage, '-ov', '-format', 'UDZO', dmg])
+  } finally {
+    rmSync(stage, { recursive: true, force: true })
+  }
   console.log(`已生成 ${dmg}`)
 }
 

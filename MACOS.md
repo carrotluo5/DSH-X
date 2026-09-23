@@ -97,6 +97,17 @@ node scripts/build-macos.mjs --zip     # 额外生成 release/DSH-X-<版本>-mac
 node scripts/build-macos.mjs --web     # → release/DSH-X-web.app（浏览器版外壳）
 ```
 
+dmg 里摆的是三样东西，不是只有一个 `.app`：
+
+```
+DSH-X.app
+Applications -> /Applications     # 拖拽目标，Finder 里显示成快捷方式
+readme.txt                        # 安装说明，模板在 scripts/dmg-readme.txt
+```
+
+`makeDmg()` 先建一个暂存目录把这三样摆好，再从暂存目录建镜像——**不能**直接
+`hdiutil create -srcfolder <app>`，那样用户打开镜像会不知道往哪拖。
+
 构建会调 `xcrun swiftc` 编 `native/main.swift`（只依赖 Command Line Tools，不需要 Xcode），
 再用 `sips` + `iconutil` 生成 `icon.icns`，最后 ad-hoc 签名（`codesign --sign -`），
 避免从别处拷过来被 Gatekeeper 报「已损坏」。首次打开如果仍被拦，右键 →「打开」一次即可。
