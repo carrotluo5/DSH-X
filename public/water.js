@@ -8,6 +8,7 @@
     precision mediump float;
     uniform vec2 resolution;
     uniform float time;
+    uniform float night;
     uniform vec3 ripples[6];
     vec2 hash(vec2 p) {
       return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453);
@@ -47,12 +48,27 @@
       float b=caustic(q*1.14+vec2(.6,.9),time+2.);
       float light=pow(a*.65+b*.35,1.6);
       float swell=sin(p.x*3.+p.y*2.+time*.18)*.5+.5;
+      float calm=exp(-dot((uv-vec2(.5,.52))*vec2(2.,3.),(uv-vec2(.5,.52))*vec2(2.,3.)));
+      if(night>.5){
+        // The same moving water catches a narrow, broken path of moonlight.
+        // 深色下焦散压得比亮色低一档：整片网纹原来偏亮，亮点只留给月光带。
+        float moonPath=exp(-pow((uv.x-.64+uv.y*.08+sin(uv.y*8.+time*.12)*.018)/(.14+uv.y*.16),2.));
+        float glint=pow(clamp(a*.65+b*.35,0.,1.),2.2);
+        float sparkle=pow(glint,2.)*(.6+.4*sin(q.x*8.+q.y*6.+time*.9));
+        vec3 darkWater=mix(vec3(.055,.061,.073),vec3(.11,.12,.14),.28+uv.y*.23+swell*.16);
+        darkWater+=vec3(.10,.11,.12)*light*(.22+moonPath*.78);
+        darkWater+=vec3(.30,.32,.34)*glint*moonPath*.9;
+        darkWater+=vec3(.16,.17,.18)*sparkle*moonPath;
+        darkWater+=vec3(.12,.13,.15)*rings;
+        darkWater=mix(darkWater,vec3(.08,.085,.098),calm*.18);
+        gl_FragColor=vec4(darkWater,1.);
+        return;
+      }
       vec3 deep=vec3(.77,.86,.94),shallow=vec3(.89,.96,.98);
       vec3 color=mix(deep,shallow,.35+uv.y*.25+swell*.15);
       color+=vec3(.085,.075,.055)*light;
       color+=rings;
       // A broad quiet area behind the controls keeps the water unobtrusive.
-      float calm=exp(-dot((uv-vec2(.5,.52))*vec2(2.,3.),(uv-vec2(.5,.52))*vec2(2.,3.)));
       color=mix(color,vec3(.91,.95,.99),calm*.35);
       gl_FragColor=vec4(color,1.);
     }`;
@@ -71,14 +87,18 @@
   const buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,buffer);
   gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
   const position=gl.getAttribLocation(program,'position');gl.enableVertexAttribArray(position);gl.vertexAttribPointer(position,2,gl.FLOAT,false,0,0);
-  const uniforms=Object.fromEntries(['resolution','time','ripples[0]'].map(n=>[n,gl.getUniformLocation(program,n)]));
+  const uniforms=Object.fromEntries(['resolution','time','night','ripples[0]'].map(n=>[n,gl.getUniformLocation(program,n)]));
   const ripples=new Float32Array(18);for(let i=0;i<6;i++)ripples[i*3+2]=-20;
   const reduced=matchMedia('(prefers-reduced-motion: reduce)');
   let frame=0,last=0,time=0,slot=0,lastRipple=-1,lost=false;
-  const active=()=>!lost&&!document.hidden&&!reduced.matches&&!document.documentElement.classList.contains('background-paused');
+  const active=()=>!lost&&!document.hidden&&!reduced.matches
+    &&!document.documentElement.classList.contains('reduce-motion')
+    &&!document.documentElement.classList.contains('background-hidden');
   function draw(){
     gl.uniform2f(uniforms.resolution,canvas.width,canvas.height);
-    gl.uniform1f(uniforms.time,time);gl.uniform3fv(uniforms['ripples[0]'],ripples);
+    gl.uniform1f(uniforms.time,time);
+    gl.uniform1f(uniforms.night,document.documentElement.dataset.colorScheme==='dark'?1:0);
+    gl.uniform3fv(uniforms['ripples[0]'],ripples);
     gl.drawArrays(gl.TRIANGLES,0,6);
   }
   function resize(){
@@ -92,14 +112,14 @@
     if(now-last>=1000/24){time+=Math.min((now-last)/1000,.1);last=now;draw();}
     frame=requestAnimationFrame(tick);
   }
-  function sync(){cancelAnimationFrame(frame);frame=0;last=0;if(active())frame=requestAnimationFrame(tick);}
+  function sync(){cancelAnimationFrame(frame);frame=0;last=0;if(!lost)draw();if(active())frame=requestAnimationFrame(tick);}
   window.addEventListener('pointerdown',e=>{
     if(!active()||e.button!==0||time-lastRipple<.08||e.target.closest('button,a,input,select,textarea,.card,nav'))return;
     const size=Math.min(innerWidth,innerHeight);
     ripples[slot*3]=e.clientX/size;ripples[slot*3+1]=(innerHeight-e.clientY)/size;ripples[slot*3+2]=time;
     slot=(slot+1)%6;lastRipple=time;
   },{passive:true});
-  new MutationObserver(sync).observe(document.documentElement,{attributes:true,attributeFilter:['class']});
+  new MutationObserver(sync).observe(document.documentElement,{attributes:true,attributeFilter:['class','data-color-scheme']});
   document.addEventListener('visibilitychange',sync);reduced.addEventListener('change',sync);
   window.addEventListener('resize',resize);
   canvas.addEventListener('webglcontextlost',()=>{lost=true;canvas.hidden=true;sync();});

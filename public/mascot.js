@@ -10,9 +10,10 @@
           <linearGradient id="mascot-eye" x2="1" y2="1"><stop stop-color="#141a32"/><stop offset="1" stop-color="#242b49"/></linearGradient>
         </defs>
         <g data-part="head">
-          <image href="/mascot/base.png" width="1254" height="1254" mask="url(#mascot-base-mask)"/>
-          <g data-part="tuft"><image href="/mascot/tuft.svg" width="1254" height="1254"/></g>
-          <g data-part="bow"><image href="/mascot/bow.svg" width="1254" height="1254"/></g>
+          <image class="mascot-light-layer" href="/mascot/base.png" width="1254" height="1254" mask="url(#mascot-base-mask)"/>
+          <image class="mascot-dark-layer" href="/mascot/base-dark.png" width="1254" height="1254" mask="url(#mascot-base-mask)"/>
+          <g data-part="tuft"><image class="mascot-light-layer" href="/mascot/tuft.svg" width="1254" height="1254"/><image class="mascot-dark-layer" href="/mascot/tuft-dark.svg" width="1254" height="1254"/></g>
+          <g data-part="bow"><image class="mascot-light-layer" href="/mascot/bow.svg" width="1254" height="1254"/><image class="mascot-dark-layer" href="/mascot/bow-dark.svg" width="1254" height="1254"/></g>
           <g data-part="gaze">
             <g transform="translate(206 760) rotate(18)"><g data-part="eye-left"><ellipse rx="61" ry="107" fill="url(#mascot-eye)"/><ellipse cx="-17" cy="-42" rx="10" ry="15" fill="white" opacity=".65"/></g><path data-part="lid-left" d="M-53 10Q0 -33 53 10" fill="none" stroke="#222940" stroke-width="13" stroke-linecap="round" opacity="0"/></g>
             <g transform="translate(631 908) rotate(18)"><g data-part="eye-right"><ellipse rx="57" ry="103" fill="url(#mascot-eye)"/><ellipse cx="-17" cy="-42" rx="9" ry="14" fill="white" opacity=".65"/></g><path data-part="lid-right" d="M-50 10Q0 -32 50 10" fill="none" stroke="#222940" stroke-width="13" stroke-linecap="round" opacity="0"/></g>
@@ -27,11 +28,14 @@
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let failed = false;
   let frame = 0, last = 0, clock = 0, nextBlink = 2 + Math.random() * 3;
-  let blinkStart = -10, happyUntil = 0, bounce = 0;
+  let blinkStart = -10, happyUntil = 0, swayStart = -10;
   let targetX = 0, targetY = 0, x = 0, y = 0, tuft = 0, velocity = 0, bow = 0, bowVelocity = 0;
   let rect = host.getBoundingClientRect();
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-  const active = () => !failed && !reduced.matches && !document.hidden;
+  const active = () => !failed && !reduced.matches && !document.hidden
+    && !document.documentElement.classList.contains('reduce-motion')
+    && !document.documentElement.classList.contains('big-fish-hidden')
+    && !document.body.classList.contains('subpage-open');
   const refreshRect = () => { rect = host.getBoundingClientRect(); };
   new ResizeObserver(refreshRect).observe(host);
   window.addEventListener('resize', refreshRect);
@@ -41,12 +45,13 @@
   }
   function sync() {
     cancelAnimationFrame(frame); frame = 0; last = 0;
-    document.documentElement.classList.toggle('background-paused', !active());
     if (active()) frame = requestAnimationFrame(tick);
     else neutral();
   }
   reduced.addEventListener('change', sync);
   document.addEventListener('visibilitychange', sync);
+  new MutationObserver(sync).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+  new MutationObserver(sync).observe(document.body, { attributes: true, attributeFilter: ['class'] });
   window.addEventListener('pointermove', event => {
     if (!active() || event.pointerType === 'touch') return;
     targetX = clamp((event.clientX - rect.left - rect.width * .4) / (innerWidth * .55), -1, 1);
@@ -61,15 +66,12 @@
     const py = (event.clientY - rect.top) / rect.height;
     if (py < .45) { velocity += clamp(event.movementX || 0, -15, 15) * 2; lastPet = clock; }
   }, { passive: true });
-  button.addEventListener('click', event => {
+  // 点击回应：闭眼呼一口气，外加一次缓慢的左右晃动。不再给 tuft/bow 灌角速度、
+  // 头部也不位移，所以不会像以前那样抖一下。
+  button.addEventListener('click', () => {
     if (!active()) return;
-    const px = event.detail ? (event.clientX - rect.left) / rect.width : .4;
-    const py = event.detail ? (event.clientY - rect.top) / rect.height : .4;
-    happyUntil = clock + 1.15; bounce = 1;
-    if (py < .3) velocity += 145;
-    else if (px > .73) bowVelocity += 155;
-    else { velocity += 75; bowVelocity += 65; }
-    velocity = clamp(velocity,-180,180); bowVelocity = clamp(bowVelocity,-180,180);
+    happyUntil = clock + 1.15;
+    swayStart = clock;
   });
   function tick(now) {
     if (!active()) { frame = 0; return; }
@@ -77,12 +79,18 @@
     last = now; clock += dt;
     const ease = 1 - Math.exp(-dt * 7);
     x += (targetX - x) * ease; y += (targetY - y) * ease;
-    const tuftTarget = x * 7 + Math.sin(clock * 2.3) * 2;
+    // 点击后的晃动：1.8s 内两个来回，振幅由两端归零的 sin 包络给出，起手和收尾都从 0
+    // 平滑过渡，所以没有突然的位移。呆毛和蝴蝶结跟着这个包络走弹簧（而不是灌一次性的
+    // 角速度），既有跟随和回摆，又不会抖。
+    const swayAge = clock - swayStart;
+    const sway = swayAge > 0 && swayAge < 1.8
+      ? Math.sin(swayAge / 1.8 * Math.PI) * Math.sin(swayAge / 1.05 * Math.PI * 2) * 2.4
+      : 0;
+    const tuftTarget = x * 7 + Math.sin(clock * 2.3) * 2 + sway * 2.8;
     velocity += ((tuftTarget - tuft) * 65 - velocity * 9) * dt; tuft += velocity * dt;
-    const bowTarget = -x * 5 + Math.sin(clock * 2.7 + 1) * 2.5;
+    const bowTarget = -x * 5 + Math.sin(clock * 2.7 + 1) * 2.5 - sway * 2.2;
     bowVelocity += ((bowTarget - bow) * 75 - bowVelocity * 10) * dt; bow += bowVelocity * dt;
-    bounce *= Math.exp(-dt * 4);
-    parts.head.setAttribute('transform', `translate(${x * 8} ${Math.sin(clock * 1.6) * 3 + y * 5 - bounce * 18}) rotate(${x * 2.4} 460 1080)`);
+    parts.head.setAttribute('transform', `translate(${x * 8} ${Math.sin(clock * 1.6) * 3 + y * 5}) rotate(${x * 2.4 + sway} 460 1080)`);
     parts.tuft.setAttribute('transform', `rotate(${tuft} 472 272)`);
     parts.bow.setAttribute('transform', `rotate(${bow} 1022 818)`);
     parts.gaze.setAttribute('transform', `translate(${x * 19} ${y * 13})`);

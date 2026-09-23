@@ -27,7 +27,7 @@
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   let failed = false;
   let frame = 0, last = 0, clock = 0, nextBlink = 2 + Math.random() * 3;
-  let blinkStart = -10, happyUntil = 0, bounce = 0;
+  let blinkStart = -10, happyUntil = 0, swayStart = -10;
   let targetX = 0, targetY = 0, x = 0, y = 0, tuft = 0, velocity = 0, bow = 0, bowVelocity = 0;
   let rect = host.getBoundingClientRect();
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
@@ -61,15 +61,12 @@
     const py = (event.clientY - rect.top) / rect.height;
     if (py < .45) { velocity += clamp(event.movementX || 0, -15, 15) * 2; lastPet = clock; }
   }, { passive: true });
-  button.addEventListener('click', event => {
+  // 点击回应：闭眼呼一口气，外加一次缓慢的左右晃动。不再给 tuft/bow 灌角速度、
+  // 头部也不位移，所以不会像以前那样抖一下。
+  button.addEventListener('click', () => {
     if (!active()) return;
-    const px = event.detail ? (event.clientX - rect.left) / rect.width : .4;
-    const py = event.detail ? (event.clientY - rect.top) / rect.height : .4;
-    happyUntil = clock + 1.15; bounce = 1;
-    if (py < .3) velocity += 145;
-    else if (px > .73) bowVelocity += 155;
-    else { velocity += 75; bowVelocity += 65; }
-    velocity = clamp(velocity,-180,180); bowVelocity = clamp(bowVelocity,-180,180);
+    happyUntil = clock + 1.15;
+    swayStart = clock;
   });
   function tick(now) {
     if (!active()) { frame = 0; return; }
@@ -77,12 +74,18 @@
     last = now; clock += dt;
     const ease = 1 - Math.exp(-dt * 7);
     x += (targetX - x) * ease; y += (targetY - y) * ease;
-    const tuftTarget = x * 7 + Math.sin(clock * 2.3) * 2;
+    // 点击后的晃动：1.8s 内两个来回，振幅由两端归零的 sin 包络给出，起手和收尾都从 0
+    // 平滑过渡，所以没有突然的位移。呆毛和蝴蝶结跟着这个包络走弹簧（而不是灌一次性的
+    // 角速度），既有跟随和回摆，又不会抖。
+    const swayAge = clock - swayStart;
+    const sway = swayAge > 0 && swayAge < 1.8
+      ? Math.sin(swayAge / 1.8 * Math.PI) * Math.sin(swayAge / 1.05 * Math.PI * 2) * 2.4
+      : 0;
+    const tuftTarget = x * 7 + Math.sin(clock * 2.3) * 2 + sway * 2.8;
     velocity += ((tuftTarget - tuft) * 65 - velocity * 9) * dt; tuft += velocity * dt;
-    const bowTarget = -x * 5 + Math.sin(clock * 2.7 + 1) * 2.5;
+    const bowTarget = -x * 5 + Math.sin(clock * 2.7 + 1) * 2.5 - sway * 2.2;
     bowVelocity += ((bowTarget - bow) * 75 - bowVelocity * 10) * dt; bow += bowVelocity * dt;
-    bounce *= Math.exp(-dt * 4);
-    parts.head.setAttribute('transform', `translate(${x * 8} ${Math.sin(clock * 1.6) * 3 + y * 5 - bounce * 18}) rotate(${x * 2.4} 460 1080)`);
+    parts.head.setAttribute('transform', `translate(${x * 8} ${Math.sin(clock * 1.6) * 3 + y * 5}) rotate(${x * 2.4 + sway} 460 1080)`);
     parts.tuft.setAttribute('transform', `rotate(${tuft} 472 272)`);
     parts.bow.setAttribute('transform', `rotate(${bow} 1022 818)`);
     parts.gaze.setAttribute('transform', `translate(${x * 19} ${y * 13})`);

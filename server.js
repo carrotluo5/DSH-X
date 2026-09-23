@@ -42,6 +42,8 @@ import {
   resolveProfile,
   safeDataDir,
   safeLang,
+  safeTheme,
+  safePanelTransparency,
   safePort,
   safeProfile,
   safeArgs,
@@ -89,6 +91,11 @@ let EXTRA_ARGS = parseArgs(loadSettingsSync().args)
 // 界面语言（zh / en）：settings.json 为准；安装时选的语言写在安装目录 lang.txt，启动时对齐一次
 const INSTALL_LANG = join(ROOT, 'lang.txt')
 let LANG = safeLang(loadSettingsSync().lang) || installLang() || 'zh'
+let THEME = safeTheme(loadSettingsSync().theme)
+let PANEL_TRANSPARENCY = safePanelTransparency(loadSettingsSync().panelTransparency)
+let REDUCE_MOTION = loadSettingsSync().reduceMotion === true
+let HIDE_BACKGROUND = loadSettingsSync().hideBackground === true
+let HIDE_BIG_FISH = loadSettingsSync().hideBigFish === true
 
 /** 安装目录里的 lang.txt（安装程序写的），只认 zh / en。 */
 function installLang() {
@@ -545,6 +552,11 @@ async function publicSettings() {
     // 回显用户填的原文（带引号），不能回显 parse 后的数组，否则含空格的值再存一次就被拆开了
     args: stored.args ?? '',
     lang: LANG,
+    theme: THEME,
+    panelTransparency: PANEL_TRANSPARENCY,
+    reduceMotion: REDUCE_MOTION,
+    hideBackground: HIDE_BACKGROUND,
+    hideBigFish: HIDE_BIG_FISH,
   }
 }
 
@@ -561,23 +573,35 @@ async function saveManagerSettings(body) {
     ...('profile' in body ? { profile: safeProfile(body.profile) } : {}),
     ...('args' in body ? { args: safeArgs(body.args) } : {}),
     ...('lang' in body ? { lang: safeLang(body.lang) } : {}),
-    autoStart: Boolean(body.autoStart),
-    seedMarket: body.seedMarket !== false,
-    autoDisablePlugins: body.autoDisablePlugins !== false,
+    ...('theme' in body ? { theme: safeTheme(body.theme) } : {}),
+    ...('panelTransparency' in body ? { panelTransparency: safePanelTransparency(body.panelTransparency) } : {}),
+    ...('reduceMotion' in body ? { reduceMotion: body.reduceMotion === true } : {}),
+    ...('hideBackground' in body ? { hideBackground: body.hideBackground === true } : {}),
+    ...('hideBigFish' in body ? { hideBigFish: body.hideBigFish === true } : {}),
+    ...('autoStart' in body ? { autoStart: Boolean(body.autoStart) } : {}),
+    ...('seedMarket' in body ? { seedMarket: body.seedMarket !== false } : {}),
+    ...('autoDisablePlugins' in body ? { autoDisablePlugins: body.autoDisablePlugins !== false } : {}),
   })
-  try {
-    await setAutoStart(stored.autoStart)
-  } catch (error) {
-    pushLog(`开机自启未写入: ${error instanceof Error ? error.message : error}`)
+  if ('autoStart' in body) {
+    try {
+      await setAutoStart(stored.autoStart)
+    } catch (error) {
+      pushLog(`开机自启未写入: ${error instanceof Error ? error.message : error}`)
+    }
   }
   // profile 立即生效：插件页、启动参数、npmrc 都读这个变量（已经在跑的 dsh 不受影响）
   EXTRA_ARGS = parseArgs(stored.args)
   if (safeLang(stored.lang)) LANG = safeLang(stored.lang)
+  THEME = safeTheme(stored.theme)
+  PANEL_TRANSPARENCY = safePanelTransparency(stored.panelTransparency)
+  REDUCE_MOTION = stored.reduceMotion === true
+  HIDE_BACKGROUND = stored.hideBackground === true
+  HIDE_BIG_FISH = stored.hideBigFish === true
   if (stored.profile && stored.profile !== PROFILE_NAME) {
     pushLog(`启动 profile 改为 ${stored.profile}`)
     PROFILE_NAME = stored.profile
   }
-  if (stored.seedMarket) {
+  if ('seedMarket' in body && stored.seedMarket) {
     const versions = listedVersions(await loadConfig())
     if (versions[0] && !pluginBusy) await seedMarket(versions[0])
   }
@@ -1799,6 +1823,18 @@ function send(res, status, body, type = 'application/json; charset=utf-8') {
   res.end(payload)
 }
 
+async function exportLogs() {
+  const chunks = []
+  for (const path of [`${LOG_FILE}.1`, LOG_FILE]) {
+    try {
+      chunks.push(await readFile(path, 'utf8'))
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
+  return redact(chunks.length ? chunks.join('') : logs.join('\n'), secretValues)
+}
+
 async function handleApi(req, res, url) {
   // 身份标记：端口被占用时我们要能分辨那是自己的另一个实例还是别人的程序
   if (url.pathname === '/api/ping') {
@@ -1841,6 +1877,11 @@ async function handleApi(req, res, url) {
   }
   if (req.method === 'GET' && url.pathname === '/api/settings') {
     send(res, 200, await publicSettings())
+    return
+  }
+  if (req.method === 'GET' && url.pathname === '/api/logs/export') {
+    res.setHeader('content-disposition', 'attachment; filename="dsh-x-logs.txt"')
+    send(res, 200, await exportLogs(), 'text/plain; charset=utf-8')
     return
   }
   if (req.method === 'GET' && url.pathname === '/api/state') {
@@ -1989,6 +2030,11 @@ export async function startServer() {
   if (fromInstall && fromInstall !== storedLang) await saveSettings({ lang: fromInstall })
   LANG = fromInstall || storedLang || 'zh'
   LANG = LANG === 'en' ? 'en' : 'zh'
+  THEME = safeTheme(stored.theme)
+  PANEL_TRANSPARENCY = safePanelTransparency(stored.panelTransparency)
+  REDUCE_MOTION = stored.reduceMotion === true
+  HIDE_BACKGROUND = stored.hideBackground === true
+  HIDE_BIG_FISH = stored.hideBigFish === true
   DATA = resolveDataDir()
   CONFIG = join(DATA, 'config.json')
   await mkdir(DATA, { recursive: true })
@@ -2017,7 +2063,7 @@ export async function startServer() {
       if (isTextFile(file)) {
         let body = await readFile(path, 'utf8')
         if (file === 'index.html') {
-          body = body.replaceAll('__APP_VERSION__', APP_VERSION).replaceAll('__APP_LANG__', LANG)
+          body = body.replaceAll('__APP_VERSION__', APP_VERSION).replaceAll('__APP_LANG__', LANG).replaceAll('__APP_THEME__', THEME).replaceAll('__APP_PANEL_TRANSPARENCY__', String(PANEL_TRANSPARENCY)).replaceAll('__APP_REDUCE_MOTION__', String(REDUCE_MOTION)).replaceAll('__APP_HIDE_BACKGROUND__', String(HIDE_BACKGROUND)).replaceAll('__APP_HIDE_BIG_FISH__', String(HIDE_BIG_FISH))
         }
         send(res, 200, body, `${type}; charset=utf-8`)
         return

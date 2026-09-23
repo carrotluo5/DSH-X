@@ -58,6 +58,11 @@ export const DEFAULTS = {
   profile: DEFAULT_PROFILE,
   // 界面语言：zh / en（安装时选的语言写进安装目录的 lang.txt，启动器读一次落到这里）
   lang: '',
+  theme: 'system',
+  panelTransparency: 0,
+  reduceMotion: false,
+  hideBackground: false,
+  hideBigFish: false,
   // 额外启动参数（一行文本，空格分词，含空格的值用引号包起来）
   args: '',
   autoStart: false,
@@ -145,6 +150,18 @@ export function safeLang(value) {
   return lang === 'en' ? 'en' : lang === 'zh' ? 'zh' : ''
 }
 
+/** 页面外观：跟随系统、浅色或深色；历史脏值回到跟随系统。 */
+export function safeTheme(value) {
+  return value === 'light' || value === 'dark' ? value : 'system'
+}
+
+/** 悬浮窗背景透明度，百分比；历史脏值回到默认值。 */
+export function safePanelTransparency(value) {
+  if (value === null || value === undefined || value === '') return DEFAULTS.panelTransparency
+  const number = Number(value)
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, Math.round(number))) : DEFAULTS.panelTransparency
+}
+
 /** 管理页端口：环境变量 PORT（开发和测试用）优先，其次 settings.json。 */
 export function resolvePort() {
   const fromEnv = Number(process.env.PORT || 0)
@@ -185,9 +202,18 @@ export function fallbackDataDir() {
   return local
 }
 
+function mergeStoredSettings(stored) {
+  const merged = { ...DEFAULTS, ...stored }
+  if (!('hideBackground' in stored) && 'disableBackgroundAnimation' in stored) {
+    merged.hideBackground = stored.disableBackgroundAnimation === true
+  }
+  delete merged.disableBackgroundAnimation
+  return merged
+}
+
 export function loadSettingsSync() {
   try {
-    return { ...DEFAULTS, ...JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) }
+    return mergeStoredSettings(JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')))
   } catch {
     return { ...DEFAULTS }
   }
@@ -195,7 +221,7 @@ export function loadSettingsSync() {
 
 export async function loadSettings() {
   try {
-    return { ...DEFAULTS, ...JSON.parse(await readFile(SETTINGS_FILE, 'utf8')) }
+    return mergeStoredSettings(JSON.parse(await readFile(SETTINGS_FILE, 'utf8')))
   } catch {
     return { ...DEFAULTS }
   }
@@ -231,6 +257,11 @@ export async function saveSettings(patch) {
   if ('profile' in patch) merged.profile = safeProfile(patch.profile)
   merged.args = 'args' in patch ? safeArgs(patch.args) : safeArgs(merged.args)
   merged.lang = 'lang' in patch ? safeLang(patch.lang) : safeLang(merged.lang)
+  merged.theme = safeTheme(merged.theme)
+  merged.panelTransparency = safePanelTransparency(merged.panelTransparency)
+  merged.reduceMotion = merged.reduceMotion === true
+  merged.hideBackground = merged.hideBackground === true
+  merged.hideBigFish = merged.hideBigFish === true
   merged.autoStart = Boolean(merged.autoStart)
   merged.seedMarket = merged.seedMarket !== false
   merged.autoDisablePlugins = merged.autoDisablePlugins !== false

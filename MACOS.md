@@ -185,8 +185,12 @@ node server.js         # 只起服务，不开页面
   目前没做
 - 通用二进制（Intel + Apple Silicon）需要 Xcode；只有 Command Line Tools 时产物是单架构
 - 启动器自身不能一键更新（上游只发 exe）；要更新就重新 `git pull` + 重新构建
-- 管理页的窗口按钮还是页面自绘那套（`.win-controls`）只在 `DSH_APP_WINDOW=1` 且页面
-  被注入时显示；原生窗口用系统红黄绿，所以两套不会同时出现（这条是刻意留的）
+- 管理页的窗口按钮用页面自绘那套（`.win-controls`），它只在**页面 URL 带 `?window=1`** 时
+  由页面自己加上 `.app-window` 类才显形。macOS 壳刻意不带这个参数，所以管理页走系统红黄绿，
+  两套不会同时出现（这条是刻意留的）。注意别混：`DSH_APP_WINDOW` 是**环境变量**，只影响
+  `start.js` 的壳桥接，跟页面上的窗口按钮无关
+- **上游契约依赖**：macOS 壳依赖页面「`?window=1` → `.app-window`」这套约定（上游 Windows 版
+  自己也用）。上游若改这两个名字，macOS 管理页的窗口外观要跟着调
 - `dsh plugin` 走系统 pnpm，版本和 Windows 包内置的 pnpm 8 可能不同；如果插件安装
   撞到 pnpm 的 peer/linker 行为差异，可以在 profile 目录的 `.npmrc` 里调
   （`node-linker=hoisted` 之类，server.js 里本来就有这条兼容路径）

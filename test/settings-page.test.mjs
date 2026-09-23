@@ -7,50 +7,88 @@ import { fileURLToPath } from 'node:url'
 const html = readFileSync(fileURLToPath(new URL('../public/index.html', import.meta.url)), 'utf8')
 
 /** 页面里那段没有打包器的内联脚本（改设置页时最容易碰坏它）。 */
-const inlineScript = () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(html)
-  assert.ok(match, '页面里应该有一段内联脚本')
-  return match[1]
+const inlineScripts = () => {
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+  assert.ok(scripts.length, '页面里应该有内联脚本')
+  return scripts.map((match) => match[1])
 }
 
-test('设置页有版本目录入口，放在高级设置里、复用现有字段样式', () => {
-  // 版本目录是长路径，用 .field.wide 占一整行，输入框铺满并带「浏览…」按钮；profile / 端口仍是窄行
-  // 标签文字现在带 data-i18n（中英切换），所以 <span> 上的属性是可选的
+test('设置页有版本目录入口，用整行的设置项样式，旁边是目录选择按钮', () => {
+  // 版本目录是长路径，用 .set-row.stacked 占一整行，输入框铺满并带「浏览…」按钮；profile / 端口仍是窄行
+  // 标签上带着 data-i18n（静态文案走的是 t() 那条线），所以只认标签文字，不管属性
   assert.match(
     html,
-    /<label class="field wide"><span(?: data-i18n="版本目录")?>版本目录<\/span>[\s\S]{0,200}?<input id="dataDir" type="text" \/>[\s\S]{0,200}?<button class="ghost" id="pickDir"/,
-    '版本目录单独占一行（.field.wide），旁边有目录选择按钮',
+    /<div class="set-row stacked">[\s\S]{0,600}?<input id="dataDir" type="text" \/>[\s\S]{0,200}?<button class="ghost" id="pickDir"/,
+    '版本目录单独占一行（.set-row.stacked），旁边有目录选择按钮',
   )
   assert.match(html, /post\('\/api\/pick-dir'/, '浏览按钮走 /api/pick-dir')
-  assert.match(html, /\.advanced \.field\.wide \{ display: block; \}/, '整行样式存在')
-  assert.match(html, /<label class="field"><span(?: data-i18n="启动 profile")?>启动 profile<\/span><select id="profile">/, 'profile 仍是窄行下拉')
+  assert.match(html, /\.set-row\.stacked \{ display: block; \}/, '整行样式存在')
+  assert.match(html, /<div class="set-control"><select id="profile"><\/select><\/div>/, 'profile 仍是窄行下拉')
   assert.match(html, /<p class="hint" id="dataDirHint"><\/p>/, '提示行复用 .hint（空内容自动隐藏）')
   // 文本输入框本来就在样式表里，新控件不需要额外 CSS
   assert.match(html, /input\[type=text\], input\[type=number\], select \{/)
 })
 
-test('保存时把版本目录一起提交，留空表示不改', () => {
-  assert.match(html, /const dirBefore = dataDirEl\.value\.trim\(\)/)
-  assert.match(html, /\.\.\.\(dirBefore \? \{ dataDir: dirBefore \} : \{\}\)/)
+test('顶栏四个 tab 已取消，设置分类在左侧导航，主页右上角是齿轮入口', () => {
+  assert.ok(!/<nav>/.test(html), '顶栏那排 tab 应该去掉')
+  assert.ok(!/data-tab=/.test(html), '不该再用 data-tab 切页面')
+  assert.match(html, /<button type="button" class="gear-btn" id="settingsEntry"/, '右上角是设置入口')
+  // 控制仍是主界面：落地就是它，回到控制时把左侧导航收起来，主页还是那张控制卡片
+  assert.match(html, /<main class="home">/, '落地时是控制面板')
+  assert.match(html, /main\.home \.settings-nav \{ display: none; \}/, '主界面不显示左侧导航')
+  for (const [pane, label] of [['control', '控制'], ['plugins', '插件'], ['log', '日志'], ['settings', '设置']]) {
+    assert.match(html, new RegExp(`class="nav-item[^"]*" data-pane="${pane}"`), `${label} 要在左侧导航里`)
+    assert.match(html, new RegExp(`<section class="pane[^"]*" id="pane-${pane}">`), `${label} 的面板要在设置页里`)
+  }
+  for (const category of ['general', 'appearance', 'advanced']) {
+    assert.match(html, new RegExp(`data-pane="settings" data-category="${category}"`), `${category} 有独立的导航入口`)
+    assert.match(html, new RegExp(`class="set-section" data-category="${category}"`), `${category} 有独立的设置内容`)
+  }
+  // dsh 不再单开一类：入口没了，那组设置项并进了常规（给个 set-caption 小标题）
+  assert.doesNotMatch(html, /data-category="dsh"/, 'dsh 分类已经并进常规')
+  assert.match(
+    html,
+    /<section class="set-section" data-category="general"[\s\S]{0,3000}?<div class="set-caption"[^>]*>dsh<\/div>[\s\S]{0,3000}?id="seedMarket"[\s\S]{0,2000}?id="profile"/,
+    '插件市场 / 启动 profile 现在挂在常规里',
+  )
+  assert.match(html, /section\.hidden = section\.dataset\.category !== nextCategory/, '切换分类只显示对应设置')
+  assert.match(html, /gearEl\.onclick = \(\) => showPane\(currentPane === 'settings' \? 'control' : 'settings', currentSettingsCategory\)/, '齿轮在设置与主界面间切换')
+  assert.match(html, /const paneLoaders = \{ plugins: loadPlugins, settings: loadSettings \}/, '进面板时才按需加载')
+})
+
+test('设置改变后自动提交，目录留空时拒绝提交', () => {
+  assert.doesNotMatch(html, /id="saveSettings"/, '不再显示保存按钮')
+  assert.match(html, /autoStartEl\.onchange = \(\) => queueSetting\('autoStart', autoStartEl\.checked\)/)
+  assert.match(html, /uiLangEl\.onchange = \(\) => queueSetting\('lang', uiLangEl\.value\)/)
+  assert.match(html, /dataDirEl\.onchange = \(\) => \{[\s\S]*?if \(dir\) queueSetting\('dataDir', dir\)/)
+  assert.match(html, /const data = await post\('\/api\/settings', patch\)/)
 })
 
 test('读到的设置填进输入框，并说明插件/profile 位置与迁移语义', () => {
   assert.match(html, /if \('dataDir' in data\) \{[\s\S]*?dataDirEl\.value = String\(data\.dataDir \?\? ''\)/)
-  // 提示文案改成 t() 的 i18n 形式了（原来是模板字符串），占位符也从 ${} 变成 {home}
-  assert.match(html, /dataDirHint\.textContent = t\('dsh 各版本装在这里/)
+  // 文案走 t()，家目录用 {home} 占位（界面语言切换后同一句话要能换掉）
+  assert.match(
+    html,
+    /dataDirHint\.textContent = t\('dsh 各版本装在这里[\s\S]{0,80}?\{home\}[\s\S]{0,40}?home: data\.dshHome/,
+    '提示行说明各版本装在这里，并把 dsh 家目录填进 {home}',
+  )
   assert.match(html, /插件和 profile 仍在/)
-  assert.match(html, /已装版本不自动迁移/)
+  assert.match(html, /已安装的版本不会自动迁移/)
 })
 
 test('改过目录的保存提示说明立即生效和不迁移', () => {
   // 末尾斜杠不该误判成"改过"：用户常带着 '\' 保存
   assert.match(html, /const normDir = \(value\) => String\(value \?\? ''\)\.trim\(\)\.replace\(\/\[\\\\\/\]\+\$\/, ''\)/)
-  assert.match(html, /normDir\(data\.dataDir\) !== normDir\(dirBefore\)/)
-  // 保存提示同样走 t()：占位符是 {dir}，不再是 ${data.dataDir}
-  assert.match(html, /版本目录已改为 \{dir\}（立即生效）/)
+  assert.match(html, /normDir\(data\.dataDir\) !== normDir\(patch\.dataDir\)/)
+  // 新目录名用 {dir} 占位传进去，别只断言写死了半句
+  assert.match(
+    html,
+    /t\('已保存。版本目录已改为 \{dir\}（立即生效）[\s\S]{0,60}?\{ dir: data\.dataDir \}\)/,
+    '提示里用 {dir} 占位，并把新目录填进去',
+  )
 })
 
 test('内联脚本仍能解析', () => {
   // 只编译不运行：语法坏了这里就炸，运行时的行为靠上面的结构断言看住
-  new vm.Script(inlineScript())
+  for (const script of inlineScripts()) new vm.Script(script)
 })
