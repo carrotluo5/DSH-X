@@ -4,12 +4,12 @@
   position: fixed; left: -3vh; bottom: -8vh;
   width: min(70vh, 48vw); aspect-ratio: 1;
   z-index: 2; pointer-events: none;
-  animation: mascot-arrive 900ms cubic-bezier(.16, 1, .3, 1) backwards;
+  /* 入场只做一次平滑的滑入淡入：进设置页会把 .mascot 藏起来（.subpage-open），
+     回到主界面时 display 变回来会重放这段动画——以前 68%/84% 有过冲回拉，看着像回弹抖一下。 */
+  animation: mascot-arrive 460ms cubic-bezier(.22, 1, .36, 1) backwards;
 }
 @keyframes mascot-arrive {
-  0% { opacity: 0; transform: translate(-34%, 28%) scale(.92) rotate(-3deg); }
-  68% { opacity: 1; transform: translate(1.8%, -1.2%) scale(1.012) rotate(.35deg); }
-  84% { transform: translate(-.7%, .4%) scale(.997) rotate(-.12deg); }
+  0% { opacity: 0; transform: translate(-16%, 12%) scale(.98); }
   100% { opacity: 1; transform: none; }
 }
 .mascot-puppet {
@@ -20,10 +20,22 @@
 .mascot-puppet:active { cursor: grabbing; }
 .mascot-puppet:focus-visible { outline: 2px solid #3b6fe0; outline-offset: -14px; border-radius: 45%; }
 .mascot svg { display: block; width: 100%; height: 100%; overflow: visible; opacity: .78; }
+.mascot-dark-layer { display: none; }
+html[data-color-scheme="dark"] .mascot-light-layer { display: none; }
+html[data-color-scheme="dark"] .mascot-dark-layer { display: inline; }
+html[data-color-scheme="dark"] #mascot-eye stop:first-child { stop-color: #161618; }
+html[data-color-scheme="dark"] #mascot-eye stop:last-child { stop-color: #303033; }
+html[data-color-scheme="dark"] .mascot [data-part="lid-left"],
+html[data-color-scheme="dark"] .mascot [data-part="lid-right"] { stroke: #242427; }
 .mascot [data-part] { will-change: transform; }
+.subpage-open .mascot { display: none; }
+html.big-fish-hidden .mascot,
+html.big-fish-hidden .backdrop-character { display: none !important; }
 header, main { z-index: 3; }
 main, .page { pointer-events: none; }
 .page > * { pointer-events: auto; }
+/* 设置页外壳：导航和内容列要能点，面板之外的空白照样穿透到看板娘身上 */
+.settings-nav, .pane-inner { pointer-events: auto; }
 @media (max-width: 600px) {
   .mascot { width: 64vw; bottom: -5vw; }
   .mascot svg { opacity: .58; }
